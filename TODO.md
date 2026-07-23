@@ -6,15 +6,15 @@
 
 ## 🧮 Phase 1: Pure In-Memory Core Domain & OOP Objects
 
-- [ ] **Step 1.1: Fixed-Point Price Model (`src/domain/price.rs`)**
-  - [ ] Implement `Price` struct containing `rupees: i64` and `paisa: u8` (`0..=99`).
-  - [ ] Implement constructors (`from_rupees_paisa`, `from_paisa_total`, `parse_str`).
-  - [ ] Implement formatting for display using `₹` symbol (e.g., `₹150.25`).
-  - [ ] Implement comparison traits (`Ord`, `PartialOrd`, `Eq`, `PartialEq`).
+- [-] **Step 1.1: Fixed-Point Price Model (`src/domain/price.rs`)**
+  - [X] Implement `Price` struct containing `rupees: i64` and `paisa: u8` (`0..=99`).
+  - [X] Implement constructors (`from_rupees_paisa`, `from_paisa_total`, `parse_str`).
+  - [X] Implement formatting for display using `₹` symbol (e.g., `₹150.25`).
+  - [X] Implement comparison traits (`Ord`, `PartialOrd`, `Eq`, `PartialEq`).
   - [ ] Implement arithmetic operations (`Add`, `Sub`) with overflow protection.
   - [ ] Add unit tests verifying zero floating-point imprecision.
 
-- [ ] **Step 1.2: Order & Trade Domain Models (`src/domain/order.rs`, `src/domain/trade.rs`)**
+- [-] **Step 1.2: Order & Trade Domain Models (`src/domain/order.rs`, `src/domain/trade.rs`)**
   - [ ] Implement `OrderSide` enum (`Bid`, `Ask`).
   - [ ] Implement `OrderType` enum (`Limit`, `Market`).
   - [ ] Implement `OrderStatus` enum (`New`, `PartiallyFilled`, `Filled`, `Cancelled`).
