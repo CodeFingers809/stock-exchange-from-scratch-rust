@@ -1,3 +1,5 @@
+use std::time::SystemTime;
+
 use super::price::Price;
 
 #[derive(Debug, Clone, Hash)]
@@ -27,6 +29,7 @@ pub struct Order {
     pub size: u64,
     pub filled_size: u64,
     pub bid_or_ask: BidOrAsk,
+    pub timestamp: SystemTime,
 }
 
 impl Order {
@@ -37,6 +40,7 @@ impl Order {
             size,
             bid_or_ask,
             filled_size: 0,
+            timestamp: SystemTime::now(),
         }
     }
 }
