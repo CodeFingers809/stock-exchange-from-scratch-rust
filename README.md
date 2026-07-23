@@ -12,7 +12,7 @@
 
 ## 🚀 Overview
 
-### **Except for this README file, I have not used AI anywhere in the logic. I did use AI to make a roadmap for this project.**
+### **I have tried my best to write code wherever I can write myself for self learning. AI was only used to automate mundance tasks.**
 
 A high-performance, deterministic **Stock Exchange & Matching Engine** built from scratch in Rust.
 
