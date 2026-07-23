@@ -1,1 +1,20 @@
 /target
+.claude/
+.gemini/
+.antigravity/
+.codegraph/
+*.ai
+
+# Environment variables & secrets
+.env
+
+# Explicitly ignore AI guideline & prompt markdown files
+AGENT.md
+ANDREJ_KARPATHY_GUIDELINES.md
+PROJECT_STRUCTURE.md
+
+# Ensure project documentation & TODO list are tracked
+!TODO.md
+!README.md
+
+
