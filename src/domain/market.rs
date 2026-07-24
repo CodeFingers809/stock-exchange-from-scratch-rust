@@ -30,6 +30,8 @@ impl fmt::Display for Market {
     }
 }
 
+use super::trade::Trade;
+
 impl Market {
     pub fn new(name: String) -> Self {
         Self {
@@ -43,17 +45,17 @@ impl Market {
         self.books.insert(symbol, book);
     }
 
-    pub fn place_limit_order(&mut self, order: Order) -> Result<String, String> {
-        match self.books.get_mut(&order.symbol) {
+    pub fn place_limit_order(&mut self, order: Order) -> Result<(Vec<Trade>, String), String> {
+        match self.books.get_mut(&order.symbol()) {
             Some(book) => book.add_limit_order(order),
-            None => Err(format!("Ticker '{}' not found in market.", order.symbol)),
+            None => Err(format!("Ticker '{}' not found in market.", order.symbol())),
         }
     }
 
-    pub fn place_market_order(&mut self, order: Order) -> Result<String, String> {
-        match self.books.get_mut(&order.symbol) {
+    pub fn place_market_order(&mut self, order: Order) -> Result<(Vec<Trade>, String), String> {
+        match self.books.get_mut(&order.symbol()) {
             Some(book) => book.add_market_order(order),
-            None => Err(format!("Ticker '{}' not found in market.", order.symbol)),
+            None => Err(format!("Ticker '{}' not found in market.", order.symbol())),
         }
     }
 

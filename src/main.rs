@@ -1,48 +1,81 @@
 use stock_exchange_rust::domain::{
+    holding::Holding,
     market::Market,
     order::{BidOrAsk, Order},
+    portfolio::Portfolio,
     price::Price,
+    user::User,
 };
 
 fn main() {
     let mut ayushse_market = Market::new("AYUSHSE".to_string());
 
-    // Register stocks on NSE
+    // Register stocks on Exchange
     ayushse_market.add_stock("TCS".to_string(), Price::from_rupees_paisa(2245, 0));
     ayushse_market.add_stock("RELIANCE".to_string(), Price::from_rupees_paisa(2500, 0));
 
-    // Place Limit Orders via Market Router
-    let _ = ayushse_market.place_limit_order(Order::new(
+    // Create User 1 (Seller) with 50 TCS shares
+    let seller_user = User {
+        id: "usr_1".to_string(),
+        name: "Alice (Seller)".to_string(),
+    };
+    let mut seller_portfolio = Portfolio::new(seller_user, "1208160012345678".to_string(), 100_000_00); // ₹100,000
+    seller_portfolio.holdings.insert(
+        "TCS".to_string(),
+        vec![Holding {
+            symbol: "TCS".to_string(),
+            quantity: 50,
+            buy_price: Price::from_rupees_paisa(2200, 0),
+            bought_at: std::time::SystemTime::now(),
+        }],
+    );
+
+    // Create User 2 (Buyer) with ₹500,000 cash
+    let buyer_user = User {
+        id: "usr_2".to_string(),
+        name: "Bob (Buyer)".to_string(),
+    };
+    let mut buyer_portfolio = Portfolio::new(buyer_user, "1208160087654321".to_string(), 500_000_00); // ₹500,000
+
+    println!("Initial Buyer Cash: ₹{:.2}", buyer_portfolio.balance_paisa as f64 / 100.0);
+    println!("Initial Seller TCS Shares: {}", seller_portfolio.total_shares("TCS"));
+
+    // 1. Seller dispatches Limit Sell Order of 50 TCS @ ₹2250.00
+    let seller_order = Order::new(
         "TCS".to_string(),
         Some(Price::from_rupees_paisa(2250, 0)),
         50,
         BidOrAsk::Ask,
-    ));
+        seller_portfolio.acc_no.clone(),
+    );
+    let _ = seller_portfolio.dispatch_limit_order(seller_order, &mut ayushse_market);
 
-    let _ = ayushse_market.place_limit_order(Order::new(
-        "TCS".to_string(),
-        Some(Price::from_rupees_paisa(2240, 50)),
-        100,
-        BidOrAsk::Bid,
-    ));
-
-    let _ = ayushse_market.place_limit_order(Order::new(
-        "RELIANCE".to_string(),
-        Some(Price::from_rupees_paisa(2505, 0)),
-        20,
-        BidOrAsk::Ask,
-    ));
-
+    println!("\nMarket Output after Seller Limit Order:");
     println!("{}", ayushse_market);
 
-    // Place Market Order on TCS via Market Router
-    let _ = ayushse_market.place_market_order(Order::new(
+    // 2. Buyer dispatches Market Buy Order of 30 TCS Shares
+    let buyer_order = Order::new(
         "TCS".to_string(),
         None,
         30,
         BidOrAsk::Bid,
-    ));
+        buyer_portfolio.acc_no.clone(),
+    );
+    
+    if let Ok((trades, _msg)) = buyer_portfolio.dispatch_market_order(buyer_order, &mut ayushse_market) {
+        // Settle executed trades on both portfolios
+        for trade in trades {
+            println!("\n🎉 Trade Executed! {} shares of {} @ {}", trade.quantity, trade.symbol, trade.price);
+            buyer_portfolio.apply_buy_trade(&trade.symbol, trade.quantity, trade.price);
+            seller_portfolio.apply_sell_trade(&trade.symbol, trade.quantity, trade.price);
+        }
+    }
 
-    println!("\n--- After Market Buy of 30 TCS Shares ---");
+    println!("\n--- Post-Trade Settlement ---");
+    println!("Buyer Cash Balance: ₹{:.2}", buyer_portfolio.balance_paisa as f64 / 100.0);
+    println!("Buyer TCS Holdings: {} shares", buyer_portfolio.total_shares("TCS"));
+    println!("Seller Cash Balance: ₹{:.2}", seller_portfolio.balance_paisa as f64 / 100.0);
+    println!("Seller Remaining TCS Shares: {}", seller_portfolio.total_shares("TCS"));
+    println!("\nUpdated Market OrderBook:");
     println!("{}", ayushse_market);
 }

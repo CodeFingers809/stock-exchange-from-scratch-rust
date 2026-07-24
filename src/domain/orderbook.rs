@@ -1,12 +1,12 @@
 use std::cmp::Ordering::{Equal, Greater, Less};
 use std::collections::{BTreeMap, VecDeque};
-
-use super::price::Price;
-use super::order::{Order, BidOrAsk};
-
 use std::fmt;
 
-#[derive(Debug, Clone, Hash)]
+use super::order::{BidOrAsk, Order};
+use super::price::Price;
+use super::trade::Trade;
+
+#[derive(Debug, Clone)]
 pub struct OrderBook {
     pub symbol: String,
     pub ltp: Price,
@@ -24,9 +24,8 @@ impl fmt::Display for OrderBook {
         if self.asks.is_empty() {
             writeln!(f, "  (No asks resting on book)")?;
         } else {
-            // Print asks in reverse order (highest ask at top, best ask at bottom near spread)
             for (price, queue) in self.asks.iter().rev() {
-                let total_volume: u64 = queue.iter().map(|o| o.size - o.filled_size).sum();
+                let total_volume: u64 = queue.iter().map(|o| o.remaining_size()).sum();
                 writeln!(f, "  {:>10}  |  {} shares ({} orders)", price, total_volume, queue.len())?;
             }
         }
@@ -37,9 +36,8 @@ impl fmt::Display for OrderBook {
         if self.bids.is_empty() {
             writeln!(f, "  (No bids resting on book)")?;
         } else {
-            // Print bids in descending order (best bid at top near spread)
             for (price, queue) in self.bids.iter().rev() {
-                let total_volume: u64 = queue.iter().map(|o| o.size - o.filled_size).sum();
+                let total_volume: u64 = queue.iter().map(|o| o.remaining_size()).sum();
                 writeln!(f, "  {:>10}  |  {} shares ({} orders)", price, total_volume, queue.len())?;
             }
         }
@@ -57,269 +55,243 @@ impl OrderBook {
             asks: BTreeMap::new(),
         }
     }
-    pub fn add_limit_order(&mut self, mut order: Order) -> Result<String, String> {
-        match order.bid_or_ask {
+
+    pub fn add_limit_order(&mut self, order: Order) -> Result<(Vec<Trade>, String), String> {
+        let mut executed_trades = Vec::new();
+        let mut trade_id_counter = 1000u64;
+
+        match order.bid_or_ask() {
             BidOrAsk::Bid => {
-                // keep matching until our limit bid is filled or seller price is too high
-                while order.size - order.filled_size > 0 {
-                    // step 1: find the cheapest seller price level available right now
+                while order.remaining_size() > 0 {
                     let best_ask_price = match self.asks.keys().next().copied() {
                         Some(price) => price,
-                        None => break, // no sellers left anywhere on the book! stop matching
+                        None => break,
                     };
 
-                    // step 2: check limit condition (seller price must be <= our limit bid price)
-                    match order.price.unwrap().cmp(&best_ask_price) {
+                    match order.price().unwrap().cmp(&best_ask_price) {
                         Greater | Equal => {
-                            // step 3: get the queue of sellers at this price level
                             if let Some(ask_queue) = self.asks.get_mut(&best_ask_price) {
-                                while order.size - order.filled_size > 0 {
-                                    // step 4: look at the first seller in line
+                                while order.remaining_size() > 0 {
                                     let first_ask = match ask_queue.front_mut() {
                                         Some(ask) => ask,
-                                        None => break, // no more sellers at this price level
+                                        None => break,
                                     };
-                                    let remaining_ask = first_ask.size - first_ask.filled_size;
-                                    let remaining_bid = order.size - order.filled_size;
+                                    let remaining_ask = first_ask.remaining_size();
+                                    let remaining_bid = order.remaining_size();
 
-                                    // step 5: update ltp whenever a trade happens
                                     self.ltp = best_ask_price;
+                                    let match_qty = std::cmp::min(remaining_bid, remaining_ask);
 
-                                    // step 6: compare remaining quantities to execute the fill
-                                    match remaining_bid.cmp(&remaining_ask) {
-                                        Greater => {
-                                            // bid needs more than this seller has -> fill this seller completely and pop them off
-                                            order.filled_size += remaining_ask;
-                                            first_ask.filled_size = first_ask.size;
-                                            ask_queue.pop_front();
-                                        }
-                                        Less => {
-                                            // bid needs less than this seller has -> fill bid completely and finish
-                                            order.filled_size += remaining_bid;
-                                            first_ask.filled_size += remaining_bid;
-                                            break;
-                                        }
-                                        Equal => {
-                                            // exact match -> fill both completely and pop seller off
-                                            order.filled_size += remaining_bid;
-                                            first_ask.filled_size = first_ask.size;
-                                            ask_queue.pop_front();
-                                            break;
-                                        }
+                                    order.fill(match_qty);
+                                    first_ask.fill(match_qty);
+
+                                    executed_trades.push(Trade::new(
+                                        trade_id_counter,
+                                        self.symbol.clone(),
+                                        best_ask_price,
+                                        match_qty,
+                                        order.acc_no(),
+                                        first_ask.acc_no(),
+                                    ));
+                                    trade_id_counter += 1;
+
+                                    if first_ask.is_filled() {
+                                        ask_queue.pop_front();
+                                    }
+
+                                    if order.is_filled() {
+                                        break;
                                     }
                                 }
 
-                                // step 7: if all sellers at this price level are gone, remove this empty price level
                                 if ask_queue.is_empty() {
                                     self.asks.remove(&best_ask_price);
                                 }
                             }
                         }
-                        Less => break, // seller is asking more than our limit bid! stop matching
+                        Less => break,
                     }
                 }
 
-                // step 8: if limit bid still has remaining unfilled size, add it to bids orderbook!
-                if order.size - order.filled_size > 0 {
-                    let price = order.price.unwrap();
+                if order.remaining_size() > 0 {
+                    let price = order.price().unwrap();
                     self.bids.entry(price).or_default().push_back(order);
                 }
 
-                Ok("Limit Bid Processed.".to_string())
+                Ok((executed_trades, "Limit Bid Processed.".to_string()))
             }
             BidOrAsk::Ask => {
-                // keep matching until our limit ask is filled or buyer price is too low
-                while order.size - order.filled_size > 0 {
-                    // step 1: find the highest buyer price level available right now
+                while order.remaining_size() > 0 {
                     let best_bid_price = match self.bids.keys().next_back().copied() {
                         Some(price) => price,
-                        None => break, // no buyers left anywhere on the book! stop matching
+                        None => break,
                     };
 
-                    // step 2: check limit condition (buyer price must be >= our limit ask price)
-                    match order.price.unwrap().cmp(&best_bid_price) {
+                    match order.price().unwrap().cmp(&best_bid_price) {
                         Less | Equal => {
-                            // step 3: get the queue of buyers at this price level
                             if let Some(bid_queue) = self.bids.get_mut(&best_bid_price) {
-                                while order.size - order.filled_size > 0 {
-                                    // step 4: look at the first buyer in line
+                                while order.remaining_size() > 0 {
                                     let first_bid = match bid_queue.front_mut() {
                                         Some(bid) => bid,
-                                        None => break, // no more buyers at this price level
+                                        None => break,
                                     };
-                                    let remaining_bid = first_bid.size - first_bid.filled_size;
-                                    let remaining_ask = order.size - order.filled_size;
+                                    let remaining_bid = first_bid.remaining_size();
+                                    let remaining_ask = order.remaining_size();
 
-                                    // step 5: update ltp whenever a trade happens
                                     self.ltp = best_bid_price;
+                                    let match_qty = std::cmp::min(remaining_ask, remaining_bid);
 
-                                    // step 6: compare remaining quantities to execute the fill
-                                    match remaining_ask.cmp(&remaining_bid) {
-                                        Greater => {
-                                            // ask needs to sell more than this buyer wants -> fill buyer completely and pop them off
-                                            order.filled_size += remaining_bid;
-                                            first_bid.filled_size = first_bid.size;
-                                            bid_queue.pop_front();
-                                        }
-                                        Less => {
-                                            // ask needs to sell less than this buyer wants -> fill ask completely and finish
-                                            order.filled_size += remaining_ask;
-                                            first_bid.filled_size += remaining_ask;
-                                            break;
-                                        }
-                                        Equal => {
-                                            // exact match -> fill both completely and pop buyer off
-                                            order.filled_size += remaining_ask;
-                                            first_bid.filled_size = first_bid.size;
-                                            bid_queue.pop_front();
-                                            break;
-                                        }
+                                    order.fill(match_qty);
+                                    first_bid.fill(match_qty);
+
+                                    executed_trades.push(Trade::new(
+                                        trade_id_counter,
+                                        self.symbol.clone(),
+                                        best_bid_price,
+                                        match_qty,
+                                        first_bid.acc_no(),
+                                        order.acc_no(),
+                                    ));
+                                    trade_id_counter += 1;
+
+                                    if first_bid.is_filled() {
+                                        bid_queue.pop_front();
+                                    }
+
+                                    if order.is_filled() {
+                                        break;
                                     }
                                 }
 
-                                // step 7: if all buyers at this price level are gone, remove this empty price level
                                 if bid_queue.is_empty() {
                                     self.bids.remove(&best_bid_price);
                                 }
                             }
                         }
-                        Greater => break, // buyer is offering less than our limit ask! stop matching
+                        Greater => break,
                     }
                 }
 
-                // step 8: if limit ask still has remaining unfilled size, add it to asks orderbook!
-                if order.size - order.filled_size > 0 {
-                    let price = order.price.unwrap();
+                if order.remaining_size() > 0 {
+                    let price = order.price().unwrap();
                     self.asks.entry(price).or_default().push_back(order);
                 }
 
-                Ok("Limit Ask Processed.".to_string())
+                Ok((executed_trades, "Limit Ask Processed.".to_string()))
             }
         }
     }
-    pub fn add_market_order(&mut self, mut order: Order) -> Result<String, String> {
-        match order.bid_or_ask {
+
+    pub fn add_market_order(&mut self, order: Order) -> Result<(Vec<Trade>, String), String> {
+        let mut executed_trades = Vec::new();
+        let mut trade_id_counter = 1000u64;
+
+        match order.bid_or_ask() {
             BidOrAsk::Bid => {
-                // keep matching until our market bid is fully filled
-                while order.size - order.filled_size > 0 {
-                    // step 1: find the cheapest seller price level available right now
+                while order.remaining_size() > 0 {
                     let best_ask_price = match self.asks.keys().next().copied() {
                         Some(price) => price,
-                        None => break, // no sellers left anywhere on the book! stop matching
+                        None => break,
                     };
 
-                    // step 2: get the queue of sellers at this price level
                     if let Some(ask_queue) = self.asks.get_mut(&best_ask_price) {
-                        while order.size - order.filled_size > 0 {
-                            // step 3: look at the first seller in line
+                        while order.remaining_size() > 0 {
                             let first_ask = match ask_queue.front_mut() {
                                 Some(ask) => ask,
-                                None => break, // no more sellers at this price level
+                                None => break,
                             };
-                            let remaining_ask = first_ask.size - first_ask.filled_size;
-                            let remaining_bid = order.size - order.filled_size;
+                            let remaining_ask = first_ask.remaining_size();
+                            let remaining_bid = order.remaining_size();
 
-                            // step 4: update ltp whenever a trade happens
                             self.ltp = best_ask_price;
+                            let match_qty = std::cmp::min(remaining_bid, remaining_ask);
 
-                            // step 5: compare remaining quantities to execute the fill
-                            match remaining_bid.cmp(&remaining_ask) {
-                                Greater => {
-                                    // bid needs more than this seller has -> fill this seller completely and pop them off
-                                    order.filled_size += remaining_ask;
-                                    first_ask.filled_size = first_ask.size;
-                                    ask_queue.pop_front();
-                                }
-                                Less => {
-                                    // bid needs less than this seller has -> fill bid completely and finish
-                                    order.filled_size += remaining_bid;
-                                    first_ask.filled_size += remaining_bid;
-                                    break;
-                                }
-                                Equal => {
-                                    // exact match -> fill both completely and pop seller off
-                                    order.filled_size += remaining_bid;
-                                    first_ask.filled_size = first_ask.size;
-                                    ask_queue.pop_front();
-                                    break;
-                                }
+                            order.fill(match_qty);
+                            first_ask.fill(match_qty);
+
+                            executed_trades.push(Trade::new(
+                                trade_id_counter,
+                                self.symbol.clone(),
+                                best_ask_price,
+                                match_qty,
+                                order.acc_no(),
+                                first_ask.acc_no(),
+                            ));
+                            trade_id_counter += 1;
+
+                            if first_ask.is_filled() {
+                                ask_queue.pop_front();
+                            }
+
+                            if order.is_filled() {
+                                break;
                             }
                         }
 
-                        // step 6: if all sellers at this price level are gone, remove this empty price level
                         if ask_queue.is_empty() {
                             self.asks.remove(&best_ask_price);
                         }
                     }
                 }
 
-                // step 7: if not a single share could be matched, return unfulfilled status
-                if order.filled_size == 0 {
-                    return Ok("Order Cannot Be Fulfilled.".to_string());
+                if order.filled_size() == 0 {
+                    return Ok((executed_trades, "Order Cannot Be Fulfilled.".to_string()));
                 }
 
-                Ok("Order Processed.".to_string())
+                Ok((executed_trades, "Order Processed.".to_string()))
             }
             BidOrAsk::Ask => {
-                // keep matching until our market ask is fully filled
-                while order.size - order.filled_size > 0 {
-                    // step 1: find the highest buyer price level available right now
+                while order.remaining_size() > 0 {
                     let best_bid_price = match self.bids.keys().next_back().copied() {
                         Some(price) => price,
-                        None => break, // no buyers left anywhere on the book! stop matching
+                        None => break,
                     };
 
-                    // step 2: get the queue of buyers at this price level
                     if let Some(bid_queue) = self.bids.get_mut(&best_bid_price) {
-                        while order.size - order.filled_size > 0 {
-                            // step 3: look at the first buyer in line
+                        while order.remaining_size() > 0 {
                             let first_bid = match bid_queue.front_mut() {
                                 Some(bid) => bid,
-                                None => break, // no more buyers at this price level
+                                None => break,
                             };
-                            let remaining_bid = first_bid.size - first_bid.filled_size;
-                            let remaining_ask = order.size - order.filled_size;
+                            let remaining_bid = first_bid.remaining_size();
+                            let remaining_ask = order.remaining_size();
 
-                            // step 4: update ltp whenever a trade happens
                             self.ltp = best_bid_price;
+                            let match_qty = std::cmp::min(remaining_ask, remaining_bid);
 
-                            // step 5: compare remaining quantities to execute the fill
-                            match remaining_ask.cmp(&remaining_bid) {
-                                Greater => {
-                                    // ask needs to sell more than this buyer wants -> fill buyer completely and pop them off
-                                    order.filled_size += remaining_bid;
-                                    first_bid.filled_size = first_bid.size;
-                                    bid_queue.pop_front();
-                                }
-                                Less => {
-                                    // ask needs to sell less than this buyer wants -> fill ask completely and finish
-                                    order.filled_size += remaining_ask;
-                                    first_bid.filled_size += remaining_ask;
-                                    break;
-                                }
-                                Equal => {
-                                    // exact match -> fill both completely and pop buyer off
-                                    order.filled_size += remaining_ask;
-                                    first_bid.filled_size = first_bid.size;
-                                    bid_queue.pop_front();
-                                    break;
-                                }
+                            order.fill(match_qty);
+                            first_bid.fill(match_qty);
+
+                            executed_trades.push(Trade::new(
+                                trade_id_counter,
+                                self.symbol.clone(),
+                                best_bid_price,
+                                match_qty,
+                                first_bid.acc_no(),
+                                order.acc_no(),
+                            ));
+                            trade_id_counter += 1;
+
+                            if first_bid.is_filled() {
+                                bid_queue.pop_front();
+                            }
+
+                            if order.is_filled() {
+                                break;
                             }
                         }
 
-                        // step 6: if all buyers at this price level are gone, remove this empty price level
                         if bid_queue.is_empty() {
                             self.bids.remove(&best_bid_price);
                         }
                     }
                 }
 
-                // step 7: if not a single share could be matched, return unfulfilled status
-                if order.filled_size == 0 {
-                    return Ok("Order Cannot Be Fulfilled.".to_string());
+                if order.filled_size() == 0 {
+                    return Ok((executed_trades, "Order Cannot Be Fulfilled.".to_string()));
                 }
 
-                Ok("Order Processed.".to_string())
+                Ok((executed_trades, "Order Processed.".to_string()))
             }
         }
     }

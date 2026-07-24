@@ -1,6 +1,6 @@
 # 📈 Stock Exchange Rust Engine (`stock-exchange-rust`)
 
-<p center>
+<p align="center">
   <img src="https://img.shields.io/badge/Rust-2021-orange.svg?style=for-the-badge&logo=rust" alt="Rust 2021"/>
   <img src="https://img.shields.io/badge/SQLite-0.7-blue.svg?style=for-the-badge&logo=sqlite" alt="SQLite"/>
   <img src="https://img.shields.io/badge/Upstash_Redis-Serverless-red.svg?style=for-the-badge&logo=redis" alt="Upstash Redis"/>
@@ -10,49 +10,53 @@
 
 ---
 
-## 🚀 Overview
-
 ### **I have tried my best to write code wherever I can write myself for self learning. AI was only used to automate mundance tasks.**
 
-A high-performance, deterministic **Stock Exchange & Matching Engine** built from scratch in Rust.
-
-Engineered with zero floating-point arithmetic errors using fixed-point integer representation (`rupees` & `paisa` up to 2 decimal places: `₹0.00`). Built incrementally with modular object-oriented domain modeling, CLI interaction checkpoints, and eventual integration with SQLite persistence and Upstash Redis event broadcasting.
+This is a stock exchange written from scratch in Rust that has all the core features of a real stock exchange.
 
 ---
 
-## 🏛️ Key Domain Objects
+## 🏛️ Codebase Modules & Architecture
 
-- 🪙 **`Price`**: Fixed-point price representation storing `rupees` (`i64`) and `paisa` (`u8`, `0..=99`).
-- 📜 **`Order`**: Limit order representation supporting `Bid` and `Ask` sides with FIFO priority.
-- 📖 **`Spread`**: Bid/Ask spread object calculating market liquidity and top-of-book levels.
-- 📗 **`OrderBook`**: BTreeMap-based matching engine managing price levels and executing matching rules.
-- 🤝 **`Trade`**: Settlement record emitted upon order match execution.
+Here is a detailed explanation of the domain modules we have built:
+
+### 1. 🪙 Fixed-Point Price (`src/domain/price.rs`)
+- Represents stock prices using integers (`paisa: u64`) to prevent floating-point calculation bugs.
+- Provides integer constructors (`from_paisa`, `from_rupees_paisa`) and custom `Display` formatting (`₹150.25`).
+
+### 2. 📜 Orders & Shared Ownership (`src/domain/order.rs`)
+- Supports **Limit Orders** and **Market Orders** for both **Buy (Bid)** and **Sell (Ask)** sides.
+- Uses `Arc<Mutex<OrderInner>>` thread-safe pointers so `OrderBook` and user `Portfolio` share the exact same order reference in memory.
+- When an order gets matched and filled in the order book, the user's open orders view updates automatically without data duplication.
+
+### 3. 📗 Order Book & Matching Engine (`src/domain/orderbook.rs`)
+- Uses price-priority `BTreeMap` queues (`bids` and `asks`) to match orders.
+- Executes limit orders and multi-level market orders.
+- Automatically updates the Last Traded Price (LTP) whenever a match happens.
+- Generates `Trade` execution records when buyer and seller orders meet.
+
+### 4. 🏢 Market Order Router (`src/domain/market.rs`)
+- Acts as the central exchange router (e.g. `AYUSHSE`, `NSE`).
+- Maps stock ticker symbols (`TCS`, `RELIANCE`) to their respective `OrderBook` instances using a `HashMap`.
+- Routes incoming buy and sell orders to the correct stock order book.
+
+### 5. 👤 User, Portfolio & Risk Validation (`src/domain/user.rs`, `src/domain/portfolio.rs`, `src/domain/holding.rs`)
+- Stores user demat accounts (`acc_no`), cash balances (`balance_paisa`), open orders, and stock holdings (`Holding`).
+- Performs **Pre-Trade Risk Checks**:
+  - Rejects buy orders if the user does not have enough cash.
+  - Rejects sell orders if the user does not own enough shares.
+- Settles trades anonymously (`apply_buy_trade`, `apply_sell_trade`) by updating cash, adding holdings, and cleaning up filled open orders.
+
+### 6. 🤝 Trade Settlement Records (`src/domain/trade.rs`)
+- Records executed trades containing `symbol`, `price`, `quantity`, `buyer_acc_no`, `seller_acc_no`, and `timestamp`.
 
 ---
 
-## 🛠️ Tech Stack
+## 🛠️ Tech Used
 
-- **Language**: Rust (2021 Edition)
-- **Currency Standard**: Indian Rupee (`₹`, 2 decimal pips)
-- **Async Runtime**: Tokio
-- **Web Framework**: Axum
-- **Database**: SQLite (via `sqlx`)
-- **Event Streaming / PubSub**: Upstash Redis
-- **Config**: `dotenvy`
+- 🦀 **Language**: Rust (2021 Edition)
+- ⚡ **Async Runtime**: Tokio (for upcoming server phase)
+- 🌐 **Web Framework**: Axum (for upcoming HTTP API)
+- 💾 **Database**: SQLite (via `sqlx` for persistence)
+- 📡 **Event Streaming**: Upstash Redis (for real-time trade events)
 
----
-
-## 📋 Development Plan & Verification
-
-Execution proceeds in progressive, verifiable checkpoints:
-1. **Core Domain Objects**: Fixed-point `Price`, `Order`, `Spread`, `OrderBook`.
-2. **CLI Sandbox**: Interactive CLI to test order submission, matching, and spread calculations in-memory.
-3. **Persistence Layer**: SQLite schema & `sqlx` repository integration.
-4. **Event Streaming**: Upstash Redis pub-sub integration for trades and book updates.
-5. **REST API Layer**: Axum HTTP endpoints (`POST /orders`, `GET /orderbook`, `GET /trades`).
-
----
-
-## 📜 Principles & Guidelines
-
-This codebase strictly follows software engineering guidelines focused on simplicity, empirical verification, zero magic, and zero floating-point imprecision. See [ANDREJ_KARPATHY_GUIDELINES.md](file:///Users/ayush/dev/Rust/stock-exchange-rust/ANDREJ_KARPATHY_GUIDELINES.md) and [TODO.md](file:///Users/ayush/dev/Rust/stock-exchange-rust/TODO.md) for progress tracking.

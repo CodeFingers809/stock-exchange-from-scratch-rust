@@ -1,78 +1,79 @@
 # 📌 Stock Exchange Project TODO List & Checkpoints
 
-> **Note**: Everything will be built incrementally by the developer. Work moves stage by stage with interactive CLI verification at each checkpoint.
+> **Note**: Everything is built incrementally by the developer. Work moves stage by stage with interactive CLI verification at each checkpoint.
 
 ---
 
-## 🧮 Phase 1: Pure In-Memory Core Domain & OOP Objects
+## 🧮 Phase 1: In-Memory Core Matching Engine & Market Router
 
-- [-] **Step 1.1: Fixed-Point Price Model (`src/domain/price.rs`)**
-  - [X] Implement `Price` struct containing `rupees: i64` and `paisa: u8` (`0..=99`).
-  - [X] Implement constructors (`from_rupees_paisa`, `from_paisa_total`, `parse_str`).
-  - [X] Implement formatting for display using `₹` symbol (e.g., `₹150.25`).
-  - [X] Implement comparison traits (`Ord`, `PartialOrd`, `Eq`, `PartialEq`).
-  - [ ] Implement arithmetic operations (`Add`, `Sub`) with overflow protection.
-  - [ ] Add unit tests verifying zero floating-point imprecision.
+- [x] **Step 1.1: Fixed-Point Price Model (`src/domain/price.rs`)**
+  - [x] Implement `Price` struct (`paisa: u64`).
+  - [x] Implement constructors (`from_paisa`, `from_rupees_paisa`).
+  - [x] Implement formatting for display using `₹` symbol (e.g., `₹150.25`).
+  - [x] Implement comparison traits (`Ord`, `PartialOrd`, `Eq`, `PartialEq`).
 
-- [-] **Step 1.2: Order & Trade Domain Models (`src/domain/order.rs`, `src/domain/trade.rs`)**
-  - [ ] Implement `OrderSide` enum (`Bid`, `Ask`).
-  - [ ] Implement `OrderType` enum (`Limit`, `Market`).
-  - [ ] Implement `OrderStatus` enum (`New`, `PartiallyFilled`, `Filled`, `Cancelled`).
-  - [ ] Implement `Order` struct (`id`, `symbol`, `side`, `price`, `quantity`, `filled_quantity`, `timestamp`, `user_id`).
-  - [ ] Implement helper methods on `Order` (`remaining_quantity()`, `is_filled()`, `fill()`).
-  - [ ] Implement `Trade` struct (`id`, `symbol`, `bid_order_id`, `ask_order_id`, `price`, `quantity`, `timestamp`).
+- [x] **Step 1.2: Order Domain Model (`src/domain/order.rs`)**
+  - [x] Implement `BidOrAsk` enum (`Bid`, `Ask`).
+  - [x] Implement `OrderType` & `OrderStatus` enums.
+  - [x] Implement `Order` struct (`symbol`, `price: Option<Price>`, `size`, `filled_size`, `bid_or_ask`, `timestamp`).
+  - [x] Implement `Display` formatting for `Order`.
 
-- [ ] **Step 1.3: Spread Object (`src/domain/spread.rs`)**
-  - [ ] Implement `Spread` struct (`best_bid: Option<Price>`, `best_ask: Option<Price>`).
-  - [ ] Implement methods: `difference() -> Option<Price>`, `mid_price() -> Option<Price>`, `display_inr()`.
+- [x] **Step 1.3: OrderBook Engine (`src/domain/orderbook.rs`)**
+  - [x] Implement `OrderBook` struct using `BTreeMap<Price, VecDeque<Order>>`.
+  - [x] Implement `add_market_order(&mut self, order: Order)` with multi-level matching and LTP updates.
+  - [x] Implement `add_limit_order(&mut self, order: Order)` with limit condition checks and book insertion.
+  - [x] Implement `Display` depth table formatting for `OrderBook`.
 
-- [ ] **Step 1.4: OrderBook & Matching Logic (`src/domain/orderbook.rs`)**
-  - [ ] Implement `OrderBook` struct using `BTreeMap<Price, VecDeque<Order>>`.
-    - Note: Bid side sorted descending (highest price first), Ask side sorted ascending (lowest price first).
-  - [ ] Implement `add_limit_order(&mut self, order: Order) -> Vec<Trade>`.
-  - [ ] Implement FIFO matching algorithm for overlapping bids/asks.
-  - [ ] Implement `cancel_order(&mut self, order_id: u64) -> bool`.
-  - [ ] Implement `get_spread(&self) -> Spread`.
-
-- [ ] **Step 1.5: In-Memory CLI Checkpoint 1 (`src/cli/mod.rs` & `src/main.rs`)**
-  - [ ] Build a interactive REPL / CLI sandbox to manually create orders, place them into the `OrderBook`, print `Spread` in `₹`, and display executed `Trades`.
-  - [ ] Verify matching logic via manual CLI operations before adding any DB/network dependencies.
+- [x] **Step 1.4: Market Router (`src/domain/market.rs`)**
+  - [x] Implement `Market` struct (`name`, `books: HashMap<String, OrderBook>`).
+  - [x] Implement ticker registration (`add_stock`).
+  - [x] Implement order routing (`place_limit_order`, `place_market_order`).
+  - [x] Implement `Display` for `Market`.
 
 ---
 
-## 💾 Phase 2: Persistence & Storage Layer (SQLite)
+## 👤 Phase 2: User, Portfolio & Holding Infrastructure
 
-- [ ] **Step 2.1: Database Schema & Migration Setup**
-  - [ ] Design SQLite tables for `orders` and `trades`.
-  - [ ] Create setup script / migrations.
+- [x] **Step 2.1: Holding & User Models (`src/domain/holding.rs`, `src/domain/user.rs`)**
+  - [x] Implement `User` struct (`id: String`, `name: String`).
+  - [x] Implement `Holding` struct (`symbol: String`, `quantity: u64`, `buy_price: Price`, `bought_at: SystemTime`).
 
-- [ ] **Step 2.2: SQLite Repositories (`src/db/`)**
-  - [ ] Implement `OrderRepository` to save & update orders.
-  - [ ] Implement `TradeRepository` to record executed trades.
+- [x] **Step 2.2: Portfolio & Risk Validation (`src/domain/portfolio.rs`)**
+  - [x] Implement `Portfolio` struct (`user`, `acc_no`, `balance_paisa`, `open_orders`, `holdings`).
+  - [x] Implement pre-trade risk validation for buy orders (cash check) and sell orders (share holdings check).
+  - [x] Implement order dispatching to market (`dispatch_limit_order`, `dispatch_market_order`).
 
-- [ ] **Step 2.3: CLI Checkpoint 2**
-  - [ ] Verify order persistence and trade history recovery from SQLite via CLI.
-
----
-
-## 📡 Phase 3: Event Broadcasting (Upstash Redis)
-
-- [ ] **Step 3.1: Redis Client & Publisher (`src/events/`)**
-  - [ ] Configure Upstash Redis client using `redis` crate.
-  - [ ] Implement `EventPublisher` struct to broadcast `TradeExecuted` and `BookUpdated` events.
-
-- [ ] **Step 3.2: Redis Subscriber Test CLI**
-  - [ ] Create CLI command to listen to real-time events published to Upstash Redis.
+- [x] **Step 2.3: Trade Generation & Portfolio Settlement (`src/domain/trade.rs`)**
+  - [x] Implement `Trade` struct emitted by `OrderBook` (`id`, `symbol`, `price`, `quantity`, `buyer_acc_no`, `seller_acc_no`, `timestamp`).
+  - [x] Update `OrderBook::add_limit_order` and `add_market_order` to generate and return `Vec<Trade>`.
+  - [x] Implement `Portfolio` trade settlement (`apply_buy_trade`, `apply_sell_trade`) and automatic filled `open_orders` cleanup.
 
 ---
 
-## 🌐 Phase 4: Web API & Server (Axum + Tokio)
+## ⚡ Phase 3: Async Tokio Server & Concurrency
 
-- [ ] **Step 4.1: Axum HTTP Endpoints (`src/api/`)**
-  - [ ] Implement `POST /api/orders` - Submit new order.
-  - [ ] Implement `DELETE /api/orders/:id` - Cancel order.
-  - [ ] Implement `GET /api/orderbook/:symbol` - Get current book depth & spread.
-  - [ ] Implement `GET /api/trades/:symbol` - Get trade history.
+- [ ] **Step 3.1: Thread-Safe State Management (`Arc<RwLock<Broker>>` / `Arc<Mutex<Market>>`)**
+  - [ ] Wrap `Market` / `Broker` in Tokio thread-safe synchronization primitives for concurrent access.
 
-- [ ] **Step 4.2: End-to-End System Verification**
-  - [ ] Verify full system under concurrent HTTP load with SQLite logging and Redis streaming.
+- [ ] **Step 3.2: Async Task Runner & CLI Control Loop (`src/main.rs`)**
+  - [ ] Convert `main.rs` to `#[tokio::main]`.
+  - [ ] Build an interactive async CLI REPL to create users, deposit funds, submit orders, and view portfolios/orderbooks concurrently.
+
+---
+
+## 💾 Phase 4: Persistence Layer (SQLite via `sqlx`)
+
+- [ ] **Step 4.1: Database Schema & Repositories (`src/db/`)**
+  - [ ] SQLite tables for `users`, `portfolios`, `orders`, and `trades`.
+  - [ ] Persist orderbook snapshots and executed trades asynchronously.
+
+---
+
+## 📡 Phase 5: Upstash Redis & Axum REST API
+
+- [ ] **Step 5.1: Real-time Event Streaming (`src/events/`)**
+  - [ ] Publish trade executions and book updates to Upstash Redis pub-sub channels.
+
+- [ ] **Step 5.2: Axum HTTP REST Endpoints (`src/api/`)**
+  - [ ] Expose REST endpoints for placing orders, inspecting orderbooks, and fetching user portfolios.
+
