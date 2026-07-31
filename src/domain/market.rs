@@ -62,4 +62,39 @@ impl Market {
     pub fn get_orderbook(&self, symbol: &str) -> Option<&OrderBook> {
         self.books.get(symbol)
     }
+
+    /// Subscribe to real-time ticker stream: LTP + best bid/ask for HFT depth checks
+    pub fn subscribe_ticker(
+        &self,
+        symbol: &str,
+        sender: std::sync::mpsc::Sender<MarketTick>,
+    ) -> Result<(), String> {
+        if let Some(book) = self.books.get(symbol) {
+            let best_bid = book.bids.keys().next_back().copied();
+            let best_ask = book.asks.keys().next().copied();
+            let tick = MarketTick {
+                exchange_name: self.name.clone(),
+                symbol: symbol.to_string(),
+                ltp: book.ltp,
+                best_bid,
+                best_ask,
+            };
+            let _ = sender.send(tick);
+            Ok(())
+        } else {
+            Err(format!("Stock ticker '{}' not found for subscription.", symbol))
+        }
+    }
+}
+
+/// Real-time Market Tick payload emitted via Market::subscribe_ticker
+#[derive(Debug, Clone)]
+pub struct MarketTick {
+    pub exchange_name: String,
+    pub symbol: String,
+    pub ltp: Price,
+    /// Best resting bid price — None if book has no buyers
+    pub best_bid: Option<Price>,
+    /// Best resting ask price — None if book has no sellers
+    pub best_ask: Option<Price>,
 }

@@ -12,6 +12,8 @@ pub struct OrderBook {
     pub ltp: Price,
     pub bids: BTreeMap<Price, VecDeque<Order>>,
     pub asks: BTreeMap<Price, VecDeque<Order>>,
+    pub sl_triggers: BTreeMap<Price, Vec<Order>>,
+    pub tp_triggers: BTreeMap<Price, Vec<Order>>,
 }
 
 impl fmt::Display for OrderBook {
@@ -53,6 +55,8 @@ impl OrderBook {
             ltp,
             bids: BTreeMap::new(),
             asks: BTreeMap::new(),
+            sl_triggers: BTreeMap::new(),
+            tp_triggers: BTreeMap::new(),
         }
     }
 
@@ -113,10 +117,24 @@ impl OrderBook {
                     }
                 }
 
+                if let Some(sl_child) = order.sl_child() {
+                    if let Some(sl_price) = sl_child.price() {
+                        self.sl_triggers.entry(sl_price).or_default().push(sl_child);
+                    }
+                }
+                if let Some(tp_child) = order.tp_child() {
+                    if let Some(tp_price) = tp_child.price() {
+                        self.tp_triggers.entry(tp_price).or_default().push(tp_child);
+                    }
+                }
+
                 if order.remaining_size() > 0 {
                     let price = order.price().unwrap();
                     self.bids.entry(price).or_default().push_back(order);
                 }
+
+                let trigger_trades = self.check_triggers();
+                executed_trades.extend(trigger_trades);
 
                 Ok((executed_trades, "Limit Bid Processed.".to_string()))
             }
@@ -172,10 +190,24 @@ impl OrderBook {
                     }
                 }
 
+                if let Some(sl_child) = order.sl_child() {
+                    if let Some(sl_price) = sl_child.price() {
+                        self.sl_triggers.entry(sl_price).or_default().push(sl_child);
+                    }
+                }
+                if let Some(tp_child) = order.tp_child() {
+                    if let Some(tp_price) = tp_child.price() {
+                        self.tp_triggers.entry(tp_price).or_default().push(tp_child);
+                    }
+                }
+
                 if order.remaining_size() > 0 {
                     let price = order.price().unwrap();
                     self.asks.entry(price).or_default().push_back(order);
                 }
+
+                let trigger_trades = self.check_triggers();
+                executed_trades.extend(trigger_trades);
 
                 Ok((executed_trades, "Limit Ask Processed.".to_string()))
             }
@@ -238,6 +270,20 @@ impl OrderBook {
                     return Ok((executed_trades, "Order Cannot Be Fulfilled.".to_string()));
                 }
 
+                if let Some(sl_child) = order.sl_child() {
+                    if let Some(sl_price) = sl_child.price() {
+                        self.sl_triggers.entry(sl_price).or_default().push(sl_child);
+                    }
+                }
+                if let Some(tp_child) = order.tp_child() {
+                    if let Some(tp_price) = tp_child.price() {
+                        self.tp_triggers.entry(tp_price).or_default().push(tp_child);
+                    }
+                }
+
+                let trigger_trades = self.check_triggers();
+                executed_trades.extend(trigger_trades);
+
                 Ok((executed_trades, "Order Processed.".to_string()))
             }
             BidOrAsk::Ask => {
@@ -291,8 +337,161 @@ impl OrderBook {
                     return Ok((executed_trades, "Order Cannot Be Fulfilled.".to_string()));
                 }
 
+                if let Some(sl_child) = order.sl_child() {
+                    if let Some(sl_price) = sl_child.price() {
+                        self.sl_triggers.entry(sl_price).or_default().push(sl_child);
+                    }
+                }
+                if let Some(tp_child) = order.tp_child() {
+                    if let Some(tp_price) = tp_child.price() {
+                        self.tp_triggers.entry(tp_price).or_default().push(tp_child);
+                    }
+                }
+
+                let trigger_trades = self.check_triggers();
+                executed_trades.extend(trigger_trades);
+
                 Ok((executed_trades, "Order Processed.".to_string()))
             }
         }
+    }
+
+    /// Checks registered SL/TP BTreeMap trigger indexes when LTP changes and converts triggered ones into market orders.
+    pub fn check_triggers(&mut self) -> Vec<Trade> {
+        let current_ltp = self.ltp;
+        let mut triggered_orders = Vec::new();
+
+        // 1. Check Stop-Loss triggers (Long SL: LTP <= Price, Short SL: LTP >= Price)
+        let sl_prices_to_remove: Vec<Price> = self
+            .sl_triggers
+            .keys()
+            .copied()
+            .filter(|&price| {
+                // If any order at this price level is triggered
+                self.sl_triggers.get(&price).map_or(false, |orders| {
+                    orders.iter().any(|o| {
+                        let is_bid = o.bid_or_ask() == BidOrAsk::Bid;
+                        if is_bid { current_ltp <= price } else { current_ltp >= price }
+                    })
+                })
+            })
+            .collect();
+
+        for price in sl_prices_to_remove {
+            if let Some(orders) = self.sl_triggers.remove(&price) {
+                for order in orders {
+                    if !order.is_filled() {
+                        triggered_orders.push(order);
+                    }
+                }
+            }
+        }
+
+        // 2. Check Target triggers (Long TP: LTP >= Price, Short TP: LTP <= Price)
+        let tp_prices_to_remove: Vec<Price> = self
+            .tp_triggers
+            .keys()
+            .copied()
+            .filter(|&price| {
+                self.tp_triggers.get(&price).map_or(false, |orders| {
+                    orders.iter().any(|o| {
+                        let is_bid = o.bid_or_ask() == BidOrAsk::Bid;
+                        if is_bid { current_ltp >= price } else { current_ltp <= price }
+                    })
+                })
+            })
+            .collect();
+
+        for price in tp_prices_to_remove {
+            if let Some(orders) = self.tp_triggers.remove(&price) {
+                for order in orders {
+                    if !order.is_filled() {
+                        triggered_orders.push(order);
+                    }
+                }
+            }
+        }
+
+        if triggered_orders.is_empty() {
+            return Vec::new();
+        }
+
+        // Execute triggered orders directly against order queues without calling check_triggers recursively
+        let mut triggered_trades = Vec::new();
+        for order in triggered_orders {
+            let mut trade_id_counter = 5000u64;
+            match order.bid_or_ask() {
+                BidOrAsk::Bid => {
+                    while order.remaining_size() > 0 {
+                        let best_ask_price = match self.asks.keys().next().copied() {
+                            Some(price) => price,
+                            None => break,
+                        };
+                        if let Some(ask_queue) = self.asks.get_mut(&best_ask_price) {
+                            while order.remaining_size() > 0 {
+                                let first_ask = match ask_queue.front_mut() {
+                                    Some(ask) => ask,
+                                    None => break,
+                                };
+                                let remaining_ask = first_ask.remaining_size();
+                                let remaining_bid = order.remaining_size();
+                                self.ltp = best_ask_price;
+                                let match_qty = std::cmp::min(remaining_bid, remaining_ask);
+                                order.fill(match_qty);
+                                first_ask.fill(match_qty);
+                                triggered_trades.push(Trade::new(
+                                    trade_id_counter,
+                                    self.symbol.clone(),
+                                    best_ask_price,
+                                    match_qty,
+                                    order.acc_no(),
+                                    first_ask.acc_no(),
+                                ));
+                                trade_id_counter += 1;
+                                if first_ask.is_filled() { ask_queue.pop_front(); }
+                                if order.is_filled() { break; }
+                            }
+                            if ask_queue.is_empty() { self.asks.remove(&best_ask_price); }
+                        }
+                    }
+                }
+                BidOrAsk::Ask => {
+                    while order.remaining_size() > 0 {
+                        let best_bid_price = match self.bids.keys().next_back().copied() {
+                            Some(price) => price,
+                            None => break,
+                        };
+                        if let Some(bid_queue) = self.bids.get_mut(&best_bid_price) {
+                            while order.remaining_size() > 0 {
+                                let first_bid = match bid_queue.front_mut() {
+                                    Some(bid) => bid,
+                                    None => break,
+                                };
+                                let remaining_bid = first_bid.remaining_size();
+                                let remaining_ask = order.remaining_size();
+                                self.ltp = best_bid_price;
+                                let match_qty = std::cmp::min(remaining_ask, remaining_bid);
+                                order.fill(match_qty);
+                                first_bid.fill(match_qty);
+                                triggered_trades.push(Trade::new(
+                                    trade_id_counter,
+                                    self.symbol.clone(),
+                                    best_bid_price,
+                                    match_qty,
+                                    first_bid.acc_no(),
+                                    order.acc_no(),
+                                ));
+                                trade_id_counter += 1;
+                                if first_bid.is_filled() { bid_queue.pop_front(); }
+                                if order.is_filled() { break; }
+                            }
+                            if bid_queue.is_empty() { self.bids.remove(&best_bid_price); }
+                        }
+                    }
+                }
+            }
+        }
+
+        triggered_trades
     }
 }

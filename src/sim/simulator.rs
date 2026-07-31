@@ -1,5 +1,6 @@
-use rand::{Rng, RngExt};
+use rand::RngExt;
 use rand_distr::{Distribution, Normal};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::domain::{
@@ -9,23 +10,35 @@ use crate::domain::{
     trade::Trade,
 };
 
-#[derive(Debug, Clone, Copy)]
-pub enum MarketSpeed {
-    Normal, // 60% of steps
-    Fast,   // 40% of steps
+/// Sentiment state shared across ALL simulators on the same exchange group.
+/// buy_prob + regime timing are consensus data — both sims see the same market direction.
+/// Volume and price offsets remain independent per simulator.
+#[derive(Debug, Clone)]
+pub struct SharedSentiment {
+    pub buy_prob: f64,
+    pub regime_started_at: Instant,
+    pub regime_duration: Duration,
 }
 
-#[derive(Debug, Clone)]
-pub struct RegimeState {
-    pub speed: MarketSpeed,
-    pub buy_prob: f64,        // Current interpolated Buy probability (0.10 to 0.90)
-    pub target_buy_prob: f64, // Target Buy probability to gently move towards
-    pub sell_prob: f64,       // 100% - Buy probability
-    pub market_order_prob: f64, // Fixed at 70% (0.70)
-    pub speed_started_at: Instant,
-    pub speed_duration: Duration, // 10 seconds
-    pub prob_started_at: Instant,
-    pub prob_duration: Duration,  // Random 3 to 4 seconds
+impl SharedSentiment {
+    pub fn new() -> Arc<Mutex<Self>> {
+        let mut rng = rand::rng();
+        Arc::new(Mutex::new(Self {
+            buy_prob: rng.random_range(0.10..=0.90),
+            regime_started_at: Instant::now(),
+            regime_duration: Duration::from_secs_f64(rng.random_range(3.0..=8.0)),
+        }))
+    }
+
+    /// Rotate to a new sentiment regime. Whichever simulator gets here first
+    /// updates it; the other reads the fresh value.
+    fn rotate(rng: &mut impl rand::Rng) -> Self {
+        Self {
+            buy_prob: rng.random_range(0.10..=0.90),
+            regime_started_at: Instant::now(),
+            regime_duration: Duration::from_secs_f64(rng.random_range(3.0..=8.0)),
+        }
+    }
 }
 
 pub struct StepMetrics {
@@ -36,109 +49,82 @@ pub struct StepMetrics {
 
 pub struct Simulator {
     pub symbol: String,
-    pub current_regime: RegimeState,
+    pub initial_reference_price: Price,
+    /// Market direction (buy_prob) shared with other simulators so sentiment is consistent.
+    pub shared_sentiment: Arc<Mutex<SharedSentiment>>,
 }
 
 impl Simulator {
-    pub fn new(symbol: String) -> Self {
+    pub fn new(symbol: String, shared_sentiment: Arc<Mutex<SharedSentiment>>) -> Self {
         Self {
             symbol,
-            current_regime: Self::generate_new_regime(),
+            initial_reference_price: Price::from_rupees_paisa(2245, 0),
+            shared_sentiment,
         }
-    }
-
-    fn generate_new_regime() -> RegimeState {
-        let mut rng = rand::rng();
-        let speed = if rng.random_bool(0.40) {
-            MarketSpeed::Fast
-        } else {
-            MarketSpeed::Normal
-        };
-        let target_buy_prob = rng.random_range(0.15..=0.85);
-        let prob_duration_secs = rng.random_range(3.0..=4.0);
-
-        RegimeState {
-            speed,
-            buy_prob: 0.50,
-            target_buy_prob,
-            sell_prob: 0.50,
-            market_order_prob: 0.70, // 70% market orders
-            speed_started_at: Instant::now(),
-            speed_duration: Duration::from_secs(10),
-            prob_started_at: Instant::now(),
-            prob_duration: Duration::from_secs_f64(prob_duration_secs),
-        }
-    }
-
-    fn check_and_update_regime(&mut self) {
-        let mut rng = rand::rng();
-
-        // 1. Toggle speed regime every 10 seconds (Slow/Normal <-> Fast)
-        if self.current_regime.speed_started_at.elapsed() >= self.current_regime.speed_duration {
-            self.current_regime.speed = match self.current_regime.speed {
-                MarketSpeed::Normal => MarketSpeed::Fast,
-                MarketSpeed::Fast => MarketSpeed::Normal,
-            };
-            self.current_regime.speed_started_at = Instant::now();
-        }
-
-        // 2. Pick a new target probability every 3 to 4 seconds
-        if self.current_regime.prob_started_at.elapsed() >= self.current_regime.prob_duration {
-            self.current_regime.target_buy_prob = rng.random_range(0.15..=0.85);
-            let prob_duration_secs = rng.random_range(3.0..=4.0);
-            self.current_regime.prob_duration = Duration::from_secs_f64(prob_duration_secs);
-            self.current_regime.prob_started_at = Instant::now();
-        }
-
-        // 3. Gently interpolate buy_prob towards target_buy_prob (smooth growth/shrink)
-        let step = 0.05; // 5% shift per iteration towards target
-        if (self.current_regime.buy_prob - self.current_regime.target_buy_prob).abs() > step {
-            if self.current_regime.buy_prob < self.current_regime.target_buy_prob {
-                self.current_regime.buy_prob += step;
-            } else {
-                self.current_regime.buy_prob -= step;
-            }
-        } else {
-            self.current_regime.buy_prob = self.current_regime.target_buy_prob;
-        }
-        self.current_regime.sell_prob = 1.0 - self.current_regime.buy_prob;
     }
 
     pub fn step(&mut self, market: &mut Market) -> StepMetrics {
-        self.check_and_update_regime();
-
         let mut rng = rand::rng();
+
+        // --- SENTIMENT (shared) ---
+        // Check if the current regime has expired and rotate if so.
+        // Whoever locks first wins; the other reads the already-updated value.
+        let buy_prob = {
+            let mut s = self.shared_sentiment.lock().unwrap();
+            if s.regime_started_at.elapsed() >= s.regime_duration {
+                *s = SharedSentiment::rotate(&mut rng);
+            }
+            s.buy_prob
+        };
+
+        // --- VOLUME (independent per simulator) ---
+        // Each exchange generates its own order volume; same sentiment, different activity.
+        let roll: f64 = rng.random();
+        let target_volume: usize = if roll < 0.70 {
+            rng.random_range(1..=15)
+        } else if roll < 0.95 {
+            rng.random_range(20..=200)
+        } else {
+            rng.random_range(500..=3000)
+        };
+
+        let market_order_prob = 0.25_f64;
+
         let mut executed_trades = Vec::new();
         let mut order_latencies = Vec::new();
-
-        // Increased order counts: Normal (10..=30), Fast (50..=250)
-        let order_count = match self.current_regime.speed {
-            MarketSpeed::Normal => rng.random_range(10..=30),
-            MarketSpeed::Fast => rng.random_range(50..=250),
-        };
 
         let current_ltp = market
             .get_orderbook(&self.symbol)
             .map(|b| b.ltp)
-            .unwrap_or_else(|| Price::from_rupees_paisa(2245, 0));
+            .unwrap_or(self.initial_reference_price);
 
-        // Constricted Gaussian distribution centered tightly at 0 (0.4% std dev) to prevent price runaway
-        let std_dev = (current_ltp.paisa as f64 * 0.004).max(10.0);
+        // Pivot / support-resistance levels from current LTP
+        let ltp_p = current_ltp.paisa as f64;
+        let r1 = Price::from_paisa(((ltp_p * 1.010) / 5.0).round() as u64 * 5);
+        let r2 = Price::from_paisa(((ltp_p * 1.025) / 5.0).round() as u64 * 5);
+        let r3 = Price::from_paisa(((ltp_p * 1.050) / 5.0).round() as u64 * 5);
+        let s1 = Price::from_paisa(((ltp_p * 0.990) / 5.0).round() as u64 * 5);
+        let s2 = Price::from_paisa(((ltp_p * 0.975) / 5.0).round() as u64 * 5);
+        let s3 = Price::from_paisa(((ltp_p * 0.950) / 5.0).round() as u64 * 5);
+
+        // Independent price noise per simulator
+        let std_dev = (current_ltp.paisa as f64 * 0.0015).max(5.0);
         let normal_dist = Normal::new(0.0, std_dev).unwrap();
 
         let step_start = Instant::now();
 
-        for _ in 0..order_count {
-            let is_buy = rng.random_bool(self.current_regime.buy_prob);
+        for _ in 0..target_volume {
+            let is_buy = rng.random_bool(buy_prob);
             let side = if is_buy { BidOrAsk::Bid } else { BidOrAsk::Ask };
-            let is_market_order = rng.random_bool(self.current_regime.market_order_prob);
+            let is_market_order = rng.random_bool(market_order_prob);
 
+            // Independent price offset per simulator (different std_dev noise seed)
             let price_offset = normal_dist.sample(&mut rng) as i64;
-            // Tightly clamp limit prices within 1.5% range to keep market price stable
-            let max_offset = (current_ltp.paisa as f64 * 0.015) as i64;
+            let max_offset = (current_ltp.paisa as f64 * 0.005) as i64;
             let clamped_offset = price_offset.clamp(-max_offset, max_offset);
 
-            let price_paisa = (current_ltp.paisa as i64 + clamped_offset).max(100) as u64;
+            let raw_paisa = (current_ltp.paisa as i64 + clamped_offset).max(5) as u64;
+            let price_paisa = (raw_paisa / 5) * 5;
 
             let order_price = if is_market_order {
                 None
@@ -146,10 +132,34 @@ impl Simulator {
                 Some(Price::from_paisa(price_paisa))
             };
 
-            let size = rng.random_range(1..=300);
-            let acc_no = format!("SIM_ACC_{}", rng.random_range(100..999));
+            // Independent order size per simulator
+            let size = rng.random_range(1..=200u64);
+            let acc_no = format!("{}", rng.random_range(100..998u32));
 
-            let order = Order::new(self.symbol.clone(), order_price, size, side, acc_no);
+            let (stop_loss, target) = if rng.random_bool(0.30) {
+                match side {
+                    BidOrAsk::Bid => {
+                        let sl = match rng.random_range(1..=3u8) { 1 => s1, 2 => s2, _ => s3 };
+                        let tp = match rng.random_range(1..=3u8) { 1 => r1, 2 => r2, _ => r3 };
+                        (Some(sl), Some(tp))
+                    }
+                    BidOrAsk::Ask => {
+                        let sl = match rng.random_range(1..=3u8) { 1 => r1, 2 => r2, _ => r3 };
+                        let tp = match rng.random_range(1..=3u8) { 1 => s1, 2 => s2, _ => s3 };
+                        (Some(sl), Some(tp))
+                    }
+                }
+            } else {
+                (None, None)
+            };
+
+            let order = Order::builder(self.symbol.clone(), order_price, size, side, acc_no);
+            let order = match (stop_loss, target) {
+                (Some(sl), Some(tp)) => order.stop_loss(sl).target(tp).build(),
+                (Some(sl), None) => order.stop_loss(sl).build(),
+                (None, Some(tp)) => order.target(tp).build(),
+                (None, None) => order.build(),
+            };
 
             let t0 = Instant::now();
             let res = if is_market_order {

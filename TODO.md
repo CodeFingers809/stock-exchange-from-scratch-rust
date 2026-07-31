@@ -50,30 +50,50 @@
 
 ---
 
-## ⚡ Phase 3: Async Tokio Server & Concurrency
+## 🎲 Phase 3: Stochastic Simulator & Real-Time Terminal TUI
 
-- [ ] **Step 3.1: Thread-Safe State Management (`Arc<RwLock<Broker>>` / `Arc<Mutex<Market>>`)**
-  - [ ] Wrap `Market` / `Broker` in Tokio thread-safe synchronization primitives for concurrent access.
+- [x] **Step 3.1: Stochastic Market Simulator (`src/sim/simulator.rs`)**
+  - [x] Implement regime shifts (Fast burst vs Normal mode every 10s).
+  - [x] Implement smooth linear interpolation (lerping) of Buy/Sell probabilities every 3-4s.
+  - [x] Implement Gaussian (Normal) price distribution around LTP with 70% market order ratio and constricted limit variance.
 
-- [ ] **Step 3.2: Async Task Runner & CLI Control Loop (`src/main.rs`)**
-  - [ ] Convert `main.rs` to `#[tokio::main]`.
-  - [ ] Build an interactive async CLI REPL to create users, deposit funds, submit orders, and view portfolios/orderbooks concurrently.
+- [x] **Step 3.2: Ratatui Full-Screen Terminal Dashboard (`src/main.rs`)**
+  - [x] Implement real-time 1-second scrolling LTP line chart with sub-pixel Braille rendering.
+  - [x] Implement top-5 color-coded Order Book L2 Depth rendering.
+  - [x] Benchmarked median order latency (`3.042 µs` overall median across 275,000+ orders).
+  - [x] Non-blocking keyboard handler (`q` to exit).
 
 ---
 
-## 💾 Phase 4: Persistence Layer (SQLite via `sqlx`)
+## ⚡ Phase 4: High-Frequency Trading (HFT) & Bracket Order Engine
 
-- [ ] **Step 4.1: Database Schema & Repositories (`src/db/`)**
+- [x] **Step 4.1: O(1) Bracket Order State Machine (`src/domain/order.rs`)**
+  - [x] Implement shared `BracketState` with `Arc<AtomicBool>` for `is_parent_filled` and `is_bracket_cancelled`.
+  - [x] Enable O(1) activation of Stop-Loss (SL) and Target (TP) exit orders on parent fill without book traversal.
+  - [x] Enable O(1) One-Cancels-the-Other (OCO) cancellation across bracket family.
+
+- [x] **Step 4.2: Cross-Exchange Arbitrage Engine (`src/hft/arbitrage.rs`)**
+  - [x] Real-time market tick subscription model (`Market::subscribe_ticker` over `mpsc` channel).
+  - [x] Actionable spread computation (`sell_exchange.best_bid - buy_exchange.best_ask`) with non-negative edge guarantees (`≥ 0 paisa`).
+  - [x] Dual-exchange execution routing (`OrderRouter`) with ₹1 minimum threshold.
+  - [x] Autonomous HFT self-flushing / inventory unloading algorithm for unhedged position rebalancing.
+  - [x] Microsecond/nanosecond engine tick latency & rolling median tracking (`latency_history`).
+
+- [x] **Step 4.3: Real-Time Multi-Exchange & HFT Dashboard (`src/main.rs`)**
+  - [x] Concurrent dual-exchange simulation (`AYUSHSE` & `BOHRASE`).
+  - [x] Real-time HFT Account & Performance Telemetry rendering (Capital, Realized PnL, Win/Loss count, Latency & Median).
+  - [x] Side-by-side exchange price monitor (`AYUSHSE LTP` vs `BOHRASE LTP`) and Spread/Inventory panel.
+  - [x] Live HFT Capital Growth curve rendering.
+
+---
+
+## 🌐 Phase 5: Async Tokio Server & Persistence (Optional Next Steps)
+
+- [ ] **Step 5.1: SQLite Persistence via `sqlx` (`src/db/`)**
   - [ ] SQLite tables for `users`, `portfolios`, `orders`, and `trades`.
-  - [ ] Persist orderbook snapshots and executed trades asynchronously.
+  - [ ] Asynchronous persistence of orderbook snapshots and executed trades.
 
----
-
-## 📡 Phase 5: Upstash Redis & Axum REST API
-
-- [ ] **Step 5.1: Real-time Event Streaming (`src/events/`)**
-  - [ ] Publish trade executions and book updates to Upstash Redis pub-sub channels.
-
-- [ ] **Step 5.2: Axum HTTP REST Endpoints (`src/api/`)**
-  - [ ] Expose REST endpoints for placing orders, inspecting orderbooks, and fetching user portfolios.
+- [ ] **Step 5.2: Upstash Redis & Axum REST API (`src/events/`, `src/api/`)**
+  - [ ] Publish trade executions and book updates to Redis pub-sub channels.
+  - [ ] Axum REST endpoints for external order placement and portfolio inspection.
 
