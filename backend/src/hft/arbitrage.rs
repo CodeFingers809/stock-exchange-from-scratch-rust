@@ -29,6 +29,8 @@ pub struct HftTelemetryUpdate {
     pub total_trades: u64,
     pub hft_internal_latency: Duration,
     pub hft_median_latency: Duration,
+    pub hft_round_trip_latency: Duration,
+    pub hft_median_round_trip_latency: Duration,
     /// Actual actionable net spread: best_bid(sell_ex) - best_ask(buy_ex).
     /// Always >= 0 (0 = no profitable opportunity this tick).
     pub current_spread_paisa: u64,
@@ -55,6 +57,8 @@ pub struct CrossExchangeArbitrage {
     pub total_executed_arbitrages: u64,
     pub hft_internal_latency: Duration,
     pub latency_history: Vec<Duration>,
+    pub round_trip_latency: Duration,
+    pub round_trip_history: Vec<Duration>,
 }
 
 impl CrossExchangeArbitrage {
@@ -71,6 +75,8 @@ impl CrossExchangeArbitrage {
             total_executed_arbitrages: 0,
             hft_internal_latency: Duration::from_nanos(450),
             latency_history: Vec::with_capacity(1000),
+            round_trip_latency: Duration::from_nanos(1200),
+            round_trip_history: Vec::with_capacity(1000),
         }
     }
 
@@ -242,13 +248,34 @@ impl CrossExchangeArbitrage {
             self.latency_history.remove(0);
         }
 
-        // Calculate median latency
+        // Compute Full Round-Trip Latency (high-precision CPU clock elapsed from tick creation at Exchange -> strategy completion)
+        let older_tick_instant = if tick_a.timestamp_instant <= tick_b.timestamp_instant {
+            tick_a.timestamp_instant
+        } else {
+            tick_b.timestamp_instant
+        };
+        let rt_dur = older_tick_instant.elapsed();
+        self.round_trip_latency = rt_dur;
+        self.round_trip_history.push(rt_dur);
+        if self.round_trip_history.len() > 1000 {
+            self.round_trip_history.remove(0);
+        }
+
+        // Calculate median latencies
         let mut sorted_lat = self.latency_history.clone();
         sorted_lat.sort_unstable();
         let median_lat = if sorted_lat.is_empty() {
             Duration::from_nanos(0)
         } else {
             sorted_lat[sorted_lat.len() / 2]
+        };
+
+        let mut sorted_rt = self.round_trip_history.clone();
+        sorted_rt.sort_unstable();
+        let median_rt_lat = if sorted_rt.is_empty() {
+            Duration::from_nanos(0)
+        } else {
+            sorted_rt[sorted_rt.len() / 2]
         };
 
         let total_balance_rupees = self.user.cash_balance_rupees();
@@ -262,6 +289,8 @@ impl CrossExchangeArbitrage {
             total_trades: self.total_executed_arbitrages,
             hft_internal_latency: self.hft_internal_latency,
             hft_median_latency: median_lat,
+            hft_round_trip_latency: self.round_trip_latency,
+            hft_median_round_trip_latency: median_rt_lat,
             current_spread_paisa,
             active_opportunity: opportunity.clone(),
             unified_inventory: current_inventory,

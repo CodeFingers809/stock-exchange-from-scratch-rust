@@ -13,8 +13,12 @@ AGENT.md
 ANDREJ_KARPATHY_GUIDELINES.md
 PROJECT_STRUCTURE.md
 
-# Ensure project documentation & TODO list are tracked
-!TODO.md
-!README.md
+# Database & storage files
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+stock_exchange.db
+backend/stock_exchange.db
 
 

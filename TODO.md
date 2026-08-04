@@ -87,13 +87,22 @@
 
 ---
 
-## 🌐 Phase 5: Async Tokio Server & Persistence (Optional Next Steps)
+## 🌐 Phase 5: Async Event Streaming & SQLite Persistence (`backend/src/db/`, `backend/src/events/`)
 
-- [ ] **Step 5.1: SQLite Persistence via `sqlx` (`src/db/`)**
-  - [ ] SQLite tables for `users`, `portfolios`, `orders`, and `trades`.
-  - [ ] Asynchronous persistence of orderbook snapshots and executed trades.
+- [x] **Step 5.1: Non-Blocking Event Streaming Pipeline**
+  - [x] Non-blocking Tokio channel dispatch (`mpsc::unbounded_channel`) from engine ticks to async background workers.
+  - [x] Redis Stream Publisher with auto-flushing `XADD MAXLEN ~ 1000` to prevent memory leaks.
+- [x] **Step 5.2: SQLite Database Persistence & State Recovery**
+  - [x] Sqlite Pool & Background Writer (`SqliteDbWriter`) for asynchronous trade logging.
+  - [x] Automatic portfolio state recovery on startup (`cargo run` loads initial user balance & holdings).
+  - [x] DB pool cost protection (`max_connections(5)`, `idle_timeout(30s)` and debounced balance saving).
 
-- [ ] **Step 5.2: Upstash Redis & Axum REST API (`src/events/`, `src/api/`)**
-  - [ ] Publish trade executions and book updates to Redis pub-sub channels.
-  - [ ] Axum REST endpoints for external order placement and portfolio inspection.
+---
+
+## 🎨 Phase 6: Next.js + Tailwind CSS + shadcn/ui Dashboard (`client/`)
+
+- [ ] **Step 6.1: Next.js Frontend UI Development**
+  - [ ] Connect Next.js frontend to Redis Streams / WebSocket server for real-time web UI dashboard visualization.
+  - [ ] Build interactive trading interface, live depth viewer, and HFT telemetry graphs using `shadcn/ui` and Tailwind CSS.
+
 

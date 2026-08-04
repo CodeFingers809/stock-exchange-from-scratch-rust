@@ -1,0 +1,9 @@
+/target
+.claude/
+.gemini/
+.antigravity/
+.codegraph/
+*.ai
+
+# Environment variables & secrets
+.env

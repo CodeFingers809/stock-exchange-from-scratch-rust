@@ -24,22 +24,45 @@ impl SharedSentiment {
     pub fn new() -> Arc<Mutex<Self>> {
         let mut rng = rand::rng();
         Arc::new(Mutex::new(Self {
-            buy_prob: rng.random_range(0.10..=0.90),
+            buy_prob: rng.random_range(0.42..=0.58),
             regime_started_at: Instant::now(),
-            regime_duration: Duration::from_secs_f64(rng.random_range(3.0..=8.0)),
+            regime_duration: Duration::from_secs_f64(rng.random_range(4.0..=12.0)),
         }))
     }
 
-    /// Rotate to a new sentiment regime. Whichever simulator gets here first
-    /// updates it; the other reads the fresh value.
-    fn rotate(rng: &mut impl rand::Rng) -> Self {
+    /// Rotate to a new sentiment regime. Symmetric around 0.50 so long-run drift is zero.
+    /// Momentum regimes (0.35–0.45 bear / 0.55–0.65 bull) are rare (25% chance).
+    fn rotate(rng: &mut impl rand::Rng, current_price_vs_ref: f64) -> Self {
+        // Mean-reversion: if price has drifted > 15% from reference, bias back toward center
+        let center_pull = if current_price_vs_ref > 1.15 {
+            -0.06 // overbought — lean bearish
+        } else if current_price_vs_ref < 0.85 {
+            0.06  // oversold — lean bullish
+        } else {
+            0.0
+        };
+
+        // 75% chance: normal choppy regime (tight band around 0.50)
+        // 25% chance: momentum regime (wider swing, still symmetric on average)
+        let base_prob = if rng.random_bool(0.75) {
+            rng.random_range(0.42..=0.58_f64)
+        } else {
+            // equal chance of bull or bear momentum
+            if rng.random_bool(0.5) {
+                rng.random_range(0.55..=0.65_f64) // bull run
+            } else {
+                rng.random_range(0.35..=0.45_f64) // bear run
+            }
+        };
+
         Self {
-            buy_prob: rng.random_range(0.10..=0.90),
+            buy_prob: (base_prob + center_pull).clamp(0.30, 0.70),
             regime_started_at: Instant::now(),
             regime_duration: Duration::from_secs_f64(rng.random_range(3.0..=8.0)),
         }
     }
 }
+
 
 pub struct StepMetrics {
     pub trades: Vec<Trade>,
@@ -55,10 +78,12 @@ pub struct Simulator {
 }
 
 impl Simulator {
-    pub fn new(symbol: String, shared_sentiment: Arc<Mutex<SharedSentiment>>) -> Self {
+    /// `initial_price_paisa` must be the stock's actual starting price so
+    /// mean-reversion is calculated against the right baseline.
+    pub fn new(symbol: String, initial_price_paisa: u64, shared_sentiment: Arc<Mutex<SharedSentiment>>) -> Self {
         Self {
             symbol,
-            initial_reference_price: Price::from_rupees_paisa(2245, 0),
+            initial_reference_price: Price::from_paisa(initial_price_paisa),
             shared_sentiment,
         }
     }
@@ -69,34 +94,28 @@ impl Simulator {
         // --- SENTIMENT (shared) ---
         // Check if the current regime has expired and rotate if so.
         // Whoever locks first wins; the other reads the already-updated value.
+        let current_ltp = market
+            .get_orderbook(&self.symbol)
+            .map(|b| b.ltp)
+            .unwrap_or(self.initial_reference_price);
+
+        let price_vs_ref = current_ltp.paisa as f64 / self.initial_reference_price.paisa as f64;
+
         let buy_prob = {
             let mut s = self.shared_sentiment.lock().unwrap();
             if s.regime_started_at.elapsed() >= s.regime_duration {
-                *s = SharedSentiment::rotate(&mut rng);
+                *s = SharedSentiment::rotate(&mut rng, price_vs_ref);
             }
             s.buy_prob
         };
 
-        // --- VOLUME (independent per simulator) ---
-        // Each exchange generates its own order volume; same sentiment, different activity.
-        let roll: f64 = rng.random();
-        let target_volume: usize = if roll < 0.70 {
-            rng.random_range(1..=15)
-        } else if roll < 0.95 {
-            rng.random_range(20..=200)
-        } else {
-            rng.random_range(500..=3000)
-        };
+        // --- VOLUME: 1–10 random orders per step per stock ---
+        let target_volume: usize = rng.random_range(1..=10);
 
         let market_order_prob = 0.25_f64;
 
         let mut executed_trades = Vec::new();
         let mut order_latencies = Vec::new();
-
-        let current_ltp = market
-            .get_orderbook(&self.symbol)
-            .map(|b| b.ltp)
-            .unwrap_or(self.initial_reference_price);
 
         // Pivot / support-resistance levels from current LTP
         let ltp_p = current_ltp.paisa as f64;

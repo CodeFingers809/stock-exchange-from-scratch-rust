@@ -78,6 +78,7 @@ impl Market {
                 ltp: book.ltp,
                 best_bid,
                 best_ask,
+                timestamp_instant: std::time::Instant::now(),
             };
             let _ = sender.send(tick);
             Ok(())
@@ -97,4 +98,5 @@ pub struct MarketTick {
     pub best_bid: Option<Price>,
     /// Best resting ask price — None if book has no sellers
     pub best_ask: Option<Price>,
+    pub timestamp_instant: std::time::Instant,
 }

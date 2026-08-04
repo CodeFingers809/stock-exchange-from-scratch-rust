@@ -17,9 +17,13 @@ impl HftUser {
     /// Account number is a pure numeric string "999" —
     /// no prefixes, treated identically by the market.
     pub fn new_with_billion_capital(user_id: String, name: String) -> Self {
+        Self::new_with_balance(user_id, name, 100_000_000_000u64)
+    }
+
+    pub fn new_with_balance(user_id: String, name: String, cash_paisa: u64) -> Self {
         let user = User::new(user_id, name);
         let initial_cash_paisa = 100_000_000_000u64;
-        let portfolio = Portfolio::new(user.clone(), "999".to_string(), initial_cash_paisa);
+        let portfolio = Portfolio::new(user.clone(), "999".to_string(), cash_paisa);
 
         Self {
             user,
