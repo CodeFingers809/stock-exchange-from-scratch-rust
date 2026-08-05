@@ -62,6 +62,7 @@ impl ApiServer {
             .route("/api/candles", get(get_candles_handler))
             .route("/api/order", post(place_order_handler))
             .route("/api/reset", post(reset_handler))
+            .route("/api/status", get(status_handler))
             .route("/api/sim/toggle", post(toggle_sim_handler))
             .route("/api/hft/toggle", post(toggle_hft_handler))
             .route("/ws", get(ws_handler))
@@ -301,6 +302,16 @@ async fn reset_handler(
     }))
 }
 
+async fn status_handler() -> Json<serde_json::Value> {
+    use crate::sim::simulator::SIMULATOR_ACTIVE;
+    use std::sync::atomic::Ordering;
+    Json(serde_json::json!({
+        "status": "OK",
+        "is_sim_active": SIMULATOR_ACTIVE.load(Ordering::Relaxed),
+        "is_hft_active": HFT_ACTIVE.load(Ordering::Relaxed),
+    }))
+}
+
 async fn toggle_sim_handler(
     axum::extract::State(state): axum::extract::State<ApiState>,
 ) -> Json<serde_json::Value> {
@@ -310,6 +321,11 @@ async fn toggle_sim_handler(
     let current = SIMULATOR_ACTIVE.load(Ordering::Relaxed);
     let next = !current;
     SIMULATOR_ACTIVE.store(next, Ordering::Relaxed);
+
+    // If SIM was turned OFF, also turn OFF HFT automatically
+    if !next {
+        HFT_ACTIVE.store(false, Ordering::Relaxed);
+    }
 
     let sim_active = SIMULATOR_ACTIVE.load(Ordering::Relaxed);
     let hft_active = HFT_ACTIVE.load(Ordering::Relaxed);
@@ -333,11 +349,21 @@ async fn toggle_hft_handler(
     use std::sync::atomic::Ordering;
     use crate::sim::simulator::SIMULATOR_ACTIVE;
 
-    let current = HFT_ACTIVE.load(Ordering::Relaxed);
-    let next = !current;
+    let sim_active = SIMULATOR_ACTIVE.load(Ordering::Relaxed);
+    let current_hft = HFT_ACTIVE.load(Ordering::Relaxed);
+
+    // Guard: Do not allow enabling HFT when Simulator is OFF
+    if !sim_active && !current_hft {
+        return Json(serde_json::json!({
+            "status": "ERROR",
+            "message": "Cannot enable HFT while simulator is off",
+            "active": false
+        }));
+    }
+
+    let next = !current_hft;
     HFT_ACTIVE.store(next, Ordering::Relaxed);
 
-    let sim_active = SIMULATOR_ACTIVE.load(Ordering::Relaxed);
     let hft_active = HFT_ACTIVE.load(Ordering::Relaxed);
 
     let state_msg = serde_json::json!({

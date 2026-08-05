@@ -140,10 +140,18 @@ export default function TerminalPage() {
   };
 
   const toggleHft = async () => {
+    if (!isSimActive && !isHftActive) {
+      alert("Please start the Market Simulator first before enabling the HFT Bot.");
+      return;
+    }
     try {
       const backendHost = process.env.NEXT_PUBLIC_API_URL || "";
       const res = await fetch(`${backendHost}/api/hft/toggle`, { method: "POST" });
       const data = await res.json();
+      if (data.status === "ERROR") {
+        alert(data.message);
+        return;
+      }
       setIsHftActive(data.active);
     } catch {
       setIsHftActive((prev) => !prev);
@@ -191,9 +199,17 @@ export default function TerminalPage() {
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
-  // Fetch stocks list & global persistent candles from backend API on mount
+  // Fetch stocks list & global persistent candles & initial SIM/HFT status from backend API on mount
   useEffect(() => {
       const backendHost = process.env.NEXT_PUBLIC_API_URL || "";
+      fetch(`${backendHost}/api/status`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (typeof data.is_sim_active === "boolean") setIsSimActive(data.is_sim_active);
+          if (typeof data.is_hft_active === "boolean") setIsHftActive(data.is_hft_active);
+        })
+        .catch(() => {});
+
       fetch(`${backendHost}/api/stocks`)
         .then((res) => res.json())
         .then((data) => {
@@ -270,6 +286,7 @@ export default function TerminalPage() {
       };
 
       const lastTickMap: Record<string, number> = {};
+      let lastHftTime = 0;
       socket.onmessage = (ev) => {
         if (!mounted) return;
         try {
@@ -318,6 +335,10 @@ export default function TerminalPage() {
             if (typeof msg.is_sim_active === "boolean") setIsSimActive(msg.is_sim_active);
             if (typeof msg.is_hft_active === "boolean") setIsHftActive(msg.is_hft_active);
           } else if (msg.type === "HFT_TELEMETRY") {
+            const now = Date.now();
+            if (now - lastHftTime < 250) return; // Throttle HFT UI rendering to smooth 250ms intervals
+            lastHftTime = now;
+
             setHft(msg);
             setHftHistory((prev) => {
               const entry = { t: Date.now(), capital: msg.capital, pnl: msg.realized_pnl };
