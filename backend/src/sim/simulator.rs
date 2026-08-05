@@ -146,22 +146,7 @@ impl Simulator {
             let size = rng.random_range(1..=200u64);
             let acc_no = format!("{}", rng.random_range(100..998u32));
 
-            let (stop_loss, target) = if rng.random_bool(0.30) {
-                match side {
-                    BidOrAsk::Bid => {
-                        let sl = match rng.random_range(1..=3u8) { 1 => s1, 2 => s2, _ => s3 };
-                        let tp = match rng.random_range(1..=3u8) { 1 => r1, 2 => r2, _ => r3 };
-                        (Some(sl), Some(tp))
-                    }
-                    BidOrAsk::Ask => {
-                        let sl = match rng.random_range(1..=3u8) { 1 => r1, 2 => r2, _ => r3 };
-                        let tp = match rng.random_range(1..=3u8) { 1 => s1, 2 => s2, _ => s3 };
-                        (Some(sl), Some(tp))
-                    }
-                }
-            } else {
-                (None, None)
-            };
+            let (stop_loss, target) = (None, None);
 
             let order = Order::builder(self.symbol.clone(), order_price, size, side, acc_no);
             let order = match (stop_loss, target) {
