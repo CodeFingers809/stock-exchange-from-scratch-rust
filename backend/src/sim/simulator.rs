@@ -30,38 +30,10 @@ impl SharedSentiment {
         }))
     }
 
-    /// Rotate to a new sentiment regime with strong mean-reversion around baseline reference price.
-    fn rotate(rng: &mut impl rand::Rng, current_price_vs_ref: f64) -> Self {
-        // Strong Mean-Reversion:
-        let center_pull = if current_price_vs_ref > 1.05 {
-            -0.15 * (current_price_vs_ref - 1.05).min(2.0) // overbought — lean bearish
-        } else if current_price_vs_ref < 0.95 {
-            0.15 * (0.95 - current_price_vs_ref).min(2.0)  // oversold — lean bullish
-        } else {
-            0.0
-        };
-
-        // 80% chance: choppy regime around 0.50
-        // 20% chance: mild momentum swing
-        let base_prob = if rng.random_bool(0.80) {
-            rng.random_range(0.46..=0.54_f64)
-        } else {
-            if rng.random_bool(0.5) {
-                rng.random_range(0.53..=0.58_f64)
-            } else {
-                rng.random_range(0.42..=0.47_f64)
-            }
-        };
-
-        let final_prob = if current_price_vs_ref < 0.70 {
-            // Hard floor: force 85% buy probability if price drops >30% below baseline
-            0.85
-        } else {
-            (base_prob + center_pull).clamp(0.35, 0.65)
-        };
-
+    /// Rotate to a purely random sentiment regime centered around 0.50.
+    fn rotate(rng: &mut impl rand::Rng, _current_price_vs_ref: f64) -> Self {
         Self {
-            buy_prob: final_prob,
+            buy_prob: rng.random_range(0.45..=0.55_f64),
             regime_started_at: Instant::now(),
             regime_duration: Duration::from_secs_f64(rng.random_range(3.0..=8.0)),
         }
