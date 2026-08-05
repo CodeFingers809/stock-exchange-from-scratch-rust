@@ -295,7 +295,9 @@ async fn reset_handler(
     }))
 }
 
-async fn toggle_sim_handler() -> Json<serde_json::Value> {
+async fn toggle_sim_handler(
+    axum::extract::State(state): axum::extract::State<ApiState>,
+) -> Json<serde_json::Value> {
     use crate::sim::simulator::SIMULATOR_ACTIVE;
     use std::sync::atomic::Ordering;
 
@@ -303,24 +305,47 @@ async fn toggle_sim_handler() -> Json<serde_json::Value> {
     let next = !current;
     SIMULATOR_ACTIVE.store(next, Ordering::Relaxed);
 
+    let sim_active = SIMULATOR_ACTIVE.load(Ordering::Relaxed);
+    let hft_active = HFT_ACTIVE.load(Ordering::Relaxed);
+
+    let state_msg = serde_json::json!({
+        "type": "STATE_UPDATE",
+        "is_sim_active": sim_active,
+        "is_hft_active": hft_active,
+    });
+    let _ = state.tx.send(state_msg.to_string());
+
     Json(serde_json::json!({
         "status": "OK",
-        "active": next
+        "active": sim_active
     }))
 }
 
 pub static HFT_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-async fn toggle_hft_handler() -> Json<serde_json::Value> {
+async fn toggle_hft_handler(
+    axum::extract::State(state): axum::extract::State<ApiState>,
+) -> Json<serde_json::Value> {
     use std::sync::atomic::Ordering;
+    use crate::sim::simulator::SIMULATOR_ACTIVE;
 
     let current = HFT_ACTIVE.load(Ordering::Relaxed);
     let next = !current;
     HFT_ACTIVE.store(next, Ordering::Relaxed);
 
+    let sim_active = SIMULATOR_ACTIVE.load(Ordering::Relaxed);
+    let hft_active = HFT_ACTIVE.load(Ordering::Relaxed);
+
+    let state_msg = serde_json::json!({
+        "type": "STATE_UPDATE",
+        "is_sim_active": sim_active,
+        "is_hft_active": hft_active,
+    });
+    let _ = state.tx.send(state_msg.to_string());
+
     Json(serde_json::json!({
         "status": "OK",
-        "active": next
+        "active": hft_active
     }))
 }
 

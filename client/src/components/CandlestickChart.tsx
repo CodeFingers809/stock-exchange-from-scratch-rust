@@ -147,16 +147,6 @@ export function CandlestickChart({
 
     mainSeriesRef.current = mainSeries as any;
 
-    const volumeSeries = chart.addSeries(HistogramSeries, {
-      color: "#1e2740",
-      priceFormat: { type: "volume" },
-      priceScaleId: "",
-    });
-    volumeSeries.priceScale().applyOptions({
-      scaleMargins: { top: 0.8, bottom: 0 },
-    });
-    volumeSeriesRef.current = volumeSeries;
-
     const handleResize = () => {
       if (chartContainerRef.current) {
         chart.applyOptions({
@@ -175,7 +165,7 @@ export function CandlestickChart({
 
   // ─── Update series data ───────────────────────────────────────────
   useEffect(() => {
-    if (!mainSeriesRef.current || !volumeSeriesRef.current || displayData.length === 0) return;
+    if (!mainSeriesRef.current || displayData.length === 0) return;
 
     if (chartType === "candle") {
       (mainSeriesRef.current as ISeriesApi<"Candlestick">).setData(
@@ -195,14 +185,6 @@ export function CandlestickChart({
         }))
       );
     }
-
-    volumeSeriesRef.current.setData(
-      displayData.map((d) => ({
-        time: d.time as any,
-        value: d.volume,
-        color: d.close >= d.open ? "#00c07630" : "#ff475730",
-      }))
-    );
   }, [displayData, chartType]);
 
   // ─── Drawing: click to place price line ──────────────────────────

@@ -268,17 +268,18 @@ export default function TerminalPage() {
         setWsConnected(true);
       };
 
-      let lastTickTime = 0;
+      const lastTickMap: Record<string, number> = {};
       socket.onmessage = (ev) => {
         if (!mounted) return;
         try {
           const msg = JSON.parse(ev.data);
           if (msg.type === "TICK") {
-            const now = Date.now();
-            if (now - lastTickTime < 250 && msg.symbol !== "AYUSH-5") return; // Throttle ticks for readability
-            lastTickTime = now;
-
             const { symbol: sym, ayushse_ltp, bohrase_ltp, med_lat_ns, rt_med_lat_ns, ayushse_bids, ayushse_asks, bohrase_bids, bohrase_asks } = msg;
+            const now = Date.now();
+
+            // Throttle ticks to max 1 update per 200ms PER SYMBOL (prevents UI blocking)
+            if (lastTickMap[sym] && now - lastTickMap[sym] < 200) return;
+            lastTickMap[sym] = now;
 
             if (med_lat_ns) setMarketLatNs(med_lat_ns);
             if (rt_med_lat_ns) setMarketRtLatNs(rt_med_lat_ns);
@@ -312,6 +313,9 @@ export default function TerminalPage() {
             if (ayushse_ltp) updateCandle(sym, "AYUSHSE", ayushse_ltp, minSec);
             if (bohrase_ltp) updateCandle(sym, "BOHRASE", bohrase_ltp, minSec);
 
+          } else if (msg.type === "STATE_UPDATE") {
+            if (typeof msg.is_sim_active === "boolean") setIsSimActive(msg.is_sim_active);
+            if (typeof msg.is_hft_active === "boolean") setIsHftActive(msg.is_hft_active);
           } else if (msg.type === "HFT_TELEMETRY") {
             setHft(msg);
             setHftHistory((prev) => {
