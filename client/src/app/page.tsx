@@ -169,6 +169,13 @@ export default function TerminalPage() {
     }
   }, [isSimActive]);
 
+  const handleReset = async () => {
+    try {
+      const backendHost = process.env.NEXT_PUBLIC_API_URL || "";
+      await fetch(`${backendHost}/api/reset`, { method: "POST" });
+    } catch {}
+  };
+
   useEffect(() => {
     if (isHftActive) {
       if (hftTimerRef.current) clearTimeout(hftTimerRef.current);
@@ -351,7 +358,21 @@ export default function TerminalPage() {
             setUserOrders([]);
             setUserHoldings({});
             setUserBalance(10_000_000);
-            setHft(null);
+            setHft({
+              capital: 1_000_000_000,
+              realized_pnl: 0,
+              trades: 0,
+              wins: 0,
+              tps: 0,
+              internal_lat_ns: 1400,
+              internal_med_ns: 1400,
+              rt_lat_ns: 5590000,
+              rt_med_ns: 5590000,
+              spread_paisa: 0,
+              inventory: 0,
+              ayushse_ltp: 3450,
+              bohrase_ltp: 3450,
+            });
             setHftHistory([]);
             setIsSimActive(false);
             setIsHftActive(false);
@@ -655,15 +676,7 @@ export default function TerminalPage() {
                   chartType={chartType}
                   symbol={activePanel?.symbol}
                   exchange={activePanel?.exchange}
-                  onReset={() => {
-                    setCandleMap({});
-                    setStocks(INITIAL_STOCKS);
-                    setUserOrders([]);
-                    setUserHoldings({});
-                    setUserBalance(1_000_000);
-                    setHft(null);
-                    setHftHistory([]);
-                  }}
+                  onReset={handleReset}
                 />
               ) : (
                 <div className="flex items-center justify-center h-full text-[#4a5568] font-mono text-xs">
