@@ -227,8 +227,8 @@ async fn place_order_handler(
 pub static HFT_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 pub static HFT_RESET_FLAG: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 pub static ENGINE_RESET_FLAG: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-pub static SIM_STARTED_AT: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
-pub static HFT_STARTED_AT: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+pub static SIM_SESSION_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+pub static HFT_SESSION_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 async fn reset_handler(
     axum::extract::State(state): axum::extract::State<ApiState>,
@@ -327,11 +327,25 @@ async fn toggle_sim_handler(
     SIMULATOR_ACTIVE.store(next, Ordering::Relaxed);
 
     if next {
-        *SIM_STARTED_AT.lock().unwrap() = Some(std::time::Instant::now());
+        let session_id = SIM_SESSION_ID.fetch_add(1, Ordering::Relaxed) + 1;
+        let tx = state.tx.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_secs(600)).await;
+            if SIM_SESSION_ID.load(Ordering::Relaxed) == session_id && SIMULATOR_ACTIVE.load(Ordering::Relaxed) {
+                println!("[SERVER AUTO-OFF] 10 minutes elapsed. Auto-disabling Market Simulator & HFT Bot.");
+                SIMULATOR_ACTIVE.store(false, Ordering::Relaxed);
+                HFT_ACTIVE.store(false, Ordering::Relaxed);
+                let _ = tx.send(serde_json::json!({
+                    "type": "STATE_UPDATE",
+                    "is_sim_active": false,
+                    "is_hft_active": false,
+                }).to_string());
+            }
+        });
     } else {
-        *SIM_STARTED_AT.lock().unwrap() = None;
+        SIM_SESSION_ID.fetch_add(1, Ordering::Relaxed);
         HFT_ACTIVE.store(false, Ordering::Relaxed);
-        *HFT_STARTED_AT.lock().unwrap() = None;
+        HFT_SESSION_ID.fetch_add(1, Ordering::Relaxed);
     }
 
     let sim_active = SIMULATOR_ACTIVE.load(Ordering::Relaxed);
@@ -372,9 +386,23 @@ async fn toggle_hft_handler(
     HFT_ACTIVE.store(next, Ordering::Relaxed);
 
     if next {
-        *HFT_STARTED_AT.lock().unwrap() = Some(std::time::Instant::now());
+        let session_id = HFT_SESSION_ID.fetch_add(1, Ordering::Relaxed) + 1;
+        let tx = state.tx.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_secs(600)).await;
+            if HFT_SESSION_ID.load(Ordering::Relaxed) == session_id && HFT_ACTIVE.load(Ordering::Relaxed) {
+                println!("[SERVER AUTO-OFF] 10 minutes elapsed. Auto-disabling HFT Bot.");
+                HFT_ACTIVE.store(false, Ordering::Relaxed);
+                let sim = SIMULATOR_ACTIVE.load(Ordering::Relaxed);
+                let _ = tx.send(serde_json::json!({
+                    "type": "STATE_UPDATE",
+                    "is_sim_active": sim,
+                    "is_hft_active": false,
+                }).to_string());
+            }
+        });
     } else {
-        *HFT_STARTED_AT.lock().unwrap() = None;
+        HFT_SESSION_ID.fetch_add(1, Ordering::Relaxed);
     }
 
     let hft_active = HFT_ACTIVE.load(Ordering::Relaxed);
