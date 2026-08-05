@@ -113,7 +113,32 @@ export default function TerminalPage() {
   const [marketRtLatNs, setMarketRtLatNs] = useState(1650);
   const [chartType, setChartType] = useState<"candle" | "line">("candle");
   const [orderbooks, setOrderbooks] = useState<Record<string, { bids: { price: number; qty: number; orders: number }[]; asks: { price: number; qty: number; orders: number }[] }>>({});
+  const [isSimActive, setIsSimActive] = useState(false);
+  const [isHftActive, setIsHftActive] = useState(true);
+  const simTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
+
+  // Auto turn-off simulator on tab change or after 10 mins
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.hidden) {
+        setIsSimActive(false);
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
+  }, []);
+
+  useEffect(() => {
+    if (isSimActive) {
+      if (simTimerRef.current) clearTimeout(simTimerRef.current);
+      simTimerRef.current = setTimeout(() => {
+        setIsSimActive(false);
+      }, 10 * 60 * 1000); // 10 minutes auto-off
+    } else {
+      if (simTimerRef.current) clearTimeout(simTimerRef.current);
+    }
+  }, [isSimActive]);
 
   // Clock tick – initialised inside useEffect to avoid SSR/client hydration mismatch
   useEffect(() => {
@@ -136,37 +161,38 @@ export default function TerminalPage() {
 
   // Fetch stocks list & global persistent candles from backend API on mount
   useEffect(() => {
-    fetch("/api/stocks")
-      .then((res) => res.json())
-      .then((data) => {
-        if (Array.isArray(data) && data.length > 0) {
-          setStocks(data);
-        }
-      })
-      .catch(() => {});
+      const backendHost = process.env.NEXT_PUBLIC_API_URL || "";
+      fetch(`${backendHost}/api/stocks`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (Array.isArray(data) && data.length > 0) {
+            setStocks(data);
+          }
+        })
+        .catch(() => {});
 
-    fetch("/api/candles")
-      .then((res) => res.json())
-      .then((data: any[]) => {
-        if (Array.isArray(data) && data.length > 0) {
-          const map: CandleMap = {};
-          data.forEach((c) => {
-            const key = candleKey(c.symbol, c.exchange);
-            if (!map[key]) map[key] = [];
-            map[key].push({
-              time: c.time,
-              open: c.open,
-              high: c.high,
-              low: c.low,
-              close: c.close,
-              volume: c.volume,
+      fetch(`${backendHost}/api/candles`)
+        .then((res) => res.json())
+        .then((data: any[]) => {
+          if (Array.isArray(data) && data.length > 0) {
+            const map: CandleMap = {};
+            data.forEach((c) => {
+              const key = candleKey(c.symbol, c.exchange);
+              if (!map[key]) map[key] = [];
+              map[key].push({
+                time: c.time,
+                open: c.open,
+                high: c.high,
+                low: c.low,
+                close: c.close,
+                volume: c.volume,
+              });
             });
-          });
-          setCandleMap(map);
-        }
-      })
-      .catch(() => {});
-  }, []);
+            setCandleMap(map);
+          }
+        })
+        .catch(() => {});
+    }, []);
 
   // WebSocket connection — updateCandle is defined inside here so it
   // never goes stale across renders (no dependency array issues).
@@ -195,8 +221,20 @@ export default function TerminalPage() {
 
     const connect = () => {
       if (!mounted) return;
-      const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const socket = new WebSocket(`${wsProtocol}//localhost:3001/ws`);
+      let wsUrl = process.env.NEXT_PUBLIC_WS_URL;
+      if (!wsUrl) {
+        // In local development or when pointing to local Rust backend:
+        const isLocal = typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+        if (isLocal) {
+          const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+          wsUrl = `${wsProtocol}//localhost:3001/ws`;
+        } else {
+          // Deployed on Vercel: Vercel serverless does NOT support persistent WebSocket connections or running long-lived Rust backend processes on the same origin.
+          // Fall back to local WS host so client can still connect to local Rust engine if running.
+          wsUrl = "ws://localhost:3001/ws";
+        }
+      }
+      const socket = new WebSocket(wsUrl);
       wsRef.current = socket;
 
       socket.onopen = () => {
@@ -497,35 +535,24 @@ export default function TerminalPage() {
                     </button>
                   ))}
                 </div>
-
-                {/* Multi-panel tabs */}
-                {panels.length > 1 && (
-                  <>
-                    <span className="text-[#253049]">│</span>
-                    <div className="flex gap-0.5">
-                      {panels.map((p) => (
-                        <button
-                          key={p.id}
-                          onClick={() => setActivePanelId(p.id)}
-                          className={`px-2 py-0.5 text-[9px] font-mono transition-colors ${
-                            p.id === activePanelId
-                              ? "bg-[#253049] text-[#e2e8f0]"
-                              : "text-[#4a5568] hover:text-[#8494a7]"
-                          }`}
-                        >
-                          {p.symbol}
-                          <span
-                            onClick={(e) => { e.stopPropagation(); removePanel(p.id); }}
-                            className="ml-1 text-[#4a5568] hover:text-[#ff4757] cursor-pointer"
-                          >×</span>
-                        </button>
-                      ))}
-                    </div>
-                  </>
-                )}
               </div>
 
               <div className="flex items-center gap-3 font-mono text-[10px]">
+                {/* Simulator On/Off Toggle */}
+                <button
+                  onClick={() => setIsSimActive(!isSimActive)}
+                  className={`px-2 py-0.5 text-[9px] font-mono rounded border transition-colors flex items-center gap-1.5 ${
+                    isSimActive
+                      ? "bg-[#00c07620] border-[#00c076] text-[#00c076]"
+                      : "bg-[#151b2b] border-[#1e2740] text-[#4a5568] hover:text-[#8494a7]"
+                  }`}
+                  title="Toggle Server Traffic Simulator (Auto-off in 10 mins or on tab close)"
+                >
+                  <span className={`w-1.5 h-1.5 rounded-full ${isSimActive ? "bg-[#00c076] animate-pulse" : "bg-[#4a5568]"}`} />
+                  SIM: {isSimActive ? "ON" : "OFF"}
+                </button>
+                <span className="text-[#253049]">│</span>
+
                 {/* Candle / Line Chart Toggle */}
                 <div className="flex border border-[#1e2740] overflow-hidden">
                   <button
@@ -754,6 +781,8 @@ export default function TerminalPage() {
                 symbol={activePanel?.symbol || "TCS"}
                 exchange={activePanel?.exchange || "AYUSHSE"}
                 currentLtp={currentPrice}
+                userBalance={userBalance}
+                userHoldingQty={userHoldings[activePanel?.symbol || "TCS"]?.qty || 0}
                 onOrderPlaced={handleOrderPlaced}
               />
             )}
@@ -831,7 +860,20 @@ export default function TerminalPage() {
 
             {rightTab === "HFT" && (
               <div className="p-3 flex flex-col gap-2.5">
-                <div className="text-[10px] font-mono tracking-widest text-[#3b82f6] uppercase">HFT Bot Telemetry</div>
+                <div className="flex items-center justify-between">
+                  <div className="text-[10px] font-mono tracking-widest text-[#3b82f6] uppercase">HFT Bot Telemetry</div>
+                  <button
+                    onClick={() => setIsHftActive(!isHftActive)}
+                    className={`px-2 py-0.5 text-[9px] font-mono rounded border transition-colors flex items-center gap-1 ${
+                      isHftActive
+                        ? "bg-[#3b82f620] border-[#3b82f6] text-[#3b82f6]"
+                        : "bg-[#151b2b] border-[#1e2740] text-[#4a5568] hover:text-[#8494a7]"
+                    }`}
+                  >
+                    <span className={`w-1.5 h-1.5 rounded-full ${isHftActive ? "bg-[#3b82f6] animate-pulse" : "bg-[#4a5568]"}`} />
+                    BOT: {isHftActive ? "ACTIVE" : "PAUSED"}
+                  </button>
+                </div>
 
                 <div className="bg-[#151b2b] border border-[#1e2740] p-2 flex flex-col gap-1.5">
                   <div className="flex justify-between text-[10px] font-mono">
@@ -918,14 +960,19 @@ export default function TerminalPage() {
       {/* ═══════════════ BOTTOM STATUS BAR ═══════════════ */}
       <footer className="h-5 flex items-center justify-between px-3 border-t border-[#1e2740] bg-[#0f1420] shrink-0 select-none">
         <div className="flex items-center gap-3 text-[9px] font-mono text-[#4a5568]">
-          <span>ENGINE v0.1</span>
+          <a
+            href="https://github.com/CodeFingers809"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[#3b82f6] hover:underline flex items-center gap-1 font-semibold"
+          >
+            GitHub: @CodeFingers809
+          </a>
           <span className="text-[#253049]">│</span>
           <span>AYUSHSE + BOHRASE</span>
         </div>
         <div className="flex items-center gap-3 text-[9px] font-mono text-[#4a5568]">
           <span>WS {wsConnected ? "OK" : "FAIL"}</span>
-          <span className="text-[#253049]">│</span>
-          <span>⌘K Search</span>
         </div>
       </footer>
 

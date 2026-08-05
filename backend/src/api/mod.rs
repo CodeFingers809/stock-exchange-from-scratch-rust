@@ -1,12 +1,16 @@
 use axum::{
-    extract::ws::{Message, WebSocket, WebSocketUpgrade},
+    extract::{ws::{Message, WebSocket, WebSocketUpgrade}, State},
+    http::{HeaderValue, StatusCode},
     response::IntoResponse,
     routing::{get, post},
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
+use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
+use tower_http::set_header::SetResponseHeaderLayer;
+use axum::http::header;
 use tokio::sync::broadcast;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -34,6 +38,7 @@ pub struct OrderRequest {
 pub struct ApiState {
     pub tx: broadcast::Sender<String>,
     pub db_pool: Option<sqlx::SqlitePool>,
+    pub redis_client: Option<redis::Client>,
 }
 
 pub struct ApiServer;
@@ -47,7 +52,10 @@ impl ApiServer {
             .allow_methods(Any)
             .allow_headers(Any);
 
-        let state = ApiState { tx: tx.clone(), db_pool };
+        let redis_url = std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string());
+        let redis_client = redis::Client::open(redis_url).ok();
+
+        let state = ApiState { tx: tx.clone(), db_pool, redis_client };
 
         let app = Router::new()
             .route("/api/stocks", get(get_stocks_handler))
@@ -55,6 +63,22 @@ impl ApiServer {
             .route("/api/order", post(place_order_handler))
             .route("/api/reset", post(reset_handler))
             .route("/ws", get(ws_handler))
+            .layer(SetResponseHeaderLayer::overriding(
+                header::X_FRAME_OPTIONS,
+                HeaderValue::from_static("DENY"),
+            ))
+            .layer(SetResponseHeaderLayer::overriding(
+                header::X_CONTENT_TYPE_OPTIONS,
+                HeaderValue::from_static("nosniff"),
+            ))
+            .layer(SetResponseHeaderLayer::overriding(
+                header::REFERRER_POLICY,
+                HeaderValue::from_static("strict-origin-when-cross-origin"),
+            ))
+            .layer(SetResponseHeaderLayer::overriding(
+                header::CONTENT_SECURITY_POLICY,
+                HeaderValue::from_static("default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:;"),
+            ))
             .with_state(state)
             .layer(cors);
 
@@ -189,12 +213,40 @@ async fn get_candles_handler(
     Json(list)
 }
 
-async fn place_order_handler(Json(_req): Json<OrderRequest>) -> Json<serde_json::Value> {
-    Json(serde_json::json!({
-        "status": "ACCEPTED",
-        "order_id": uuid::Uuid::new_v4().to_string(),
-        "message": "Order successfully routed to exchange matching engine"
-    }))
+async fn place_order_handler(
+    State(state): State<ApiState>,
+    Json(_req): Json<OrderRequest>,
+) -> impl IntoResponse {
+    // Redis Rate Limiting (max 20 orders/sec per client IP/endpoint)
+    if let Some(ref client) = state.redis_client {
+        if let Ok(mut con) = client.get_connection() {
+            let key = "rate_limit:api_orders";
+            let count: redis::RedisResult<u64> = redis::cmd("INCR").arg(key).query(&mut con);
+            if let Ok(c) = count {
+                if c == 1 {
+                    let _: redis::RedisResult<()> = redis::cmd("EXPIRE").arg(key).arg(1).query(&mut con);
+                }
+                if c > 30 {
+                    return (
+                        StatusCode::TOO_MANY_REQUESTS,
+                        Json(serde_json::json!({
+                            "error": "Rate limit exceeded. Max 30 orders/sec allowed.",
+                            "status": "REJECTED"
+                        })),
+                    ).into_response();
+                }
+            }
+        }
+    }
+
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "status": "ACCEPTED",
+            "order_id": uuid::Uuid::new_v4().to_string(),
+            "message": "Order successfully routed to exchange matching engine"
+        })),
+    ).into_response()
 }
 
 async fn reset_handler(

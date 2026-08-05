@@ -6,17 +6,19 @@ interface OrderTicketProps {
   symbol: string;
   exchange: string;
   currentLtp: number;
+  userBalance?: number;
+  userHoldingQty?: number;
   onOrderPlaced?: (order: { symbol: string; exchange: string; side: "BUY" | "SELL"; qty: number; price: number; sl: number; tp: number }) => void;
 }
 
-export function OrderTicket({ symbol, exchange, currentLtp, onOrderPlaced }: OrderTicketProps) {
+export function OrderTicket({ symbol, exchange, currentLtp, userBalance = 1_000_000, userHoldingQty = 0, onOrderPlaced }: OrderTicketProps) {
   const [orderType, setOrderType] = useState<"MARKET" | "LIMIT">("LIMIT");
   const [side, setSide] = useState<"BUY" | "SELL">("BUY");
   const [price, setPrice] = useState<string>(currentLtp.toFixed(2));
   const [quantity, setQuantity] = useState<string>("100");
   const [stopLoss, setStopLoss] = useState<string>((currentLtp * 0.98).toFixed(2));
   const [takeProfit, setTakeProfit] = useState<string>((currentLtp * 1.05).toFixed(2));
-  const [statusMsg, setStatusMsg] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   // Sync price/SL/TP when currentLtp changes significantly
   useEffect(() => {
@@ -37,10 +39,27 @@ export function OrderTicket({ symbol, exchange, currentLtp, onOrderPlaced }: Ord
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setStatusMsg("Routing...");
+    setErrorMsg(null);
+
+    // 1. Validation Checks
+    if (qty <= 0) {
+      setErrorMsg("Please enter a valid quantity");
+      return;
+    }
+
+    if (side === "SELL" && userHoldingQty < qty) {
+      setErrorMsg(`Insufficient inventory! Holding: ${userHoldingQty} ${symbol}`);
+      return;
+    }
+
+    if (side === "BUY" && userBalance < totalCost) {
+      setErrorMsg(`Insufficient balance! Required: ₹${totalCost.toFixed(2)}`);
+      return;
+    }
 
     try {
-      const res = await fetch("/api/order", {
+      const backendHost = process.env.NEXT_PUBLIC_API_URL || "";
+      const res = await fetch(`${backendHost}/api/order`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -54,8 +73,8 @@ export function OrderTicket({ symbol, exchange, currentLtp, onOrderPlaced }: Ord
           take_profit_paisa: Math.round(tpPrice * 100),
         }),
       });
+      if (!res.ok) throw new Error("API error");
       const data = await res.json();
-      setStatusMsg(`Filled \u2014 ${data.order_id.slice(0, 8)}`);
       onOrderPlaced?.({
         symbol,
         exchange,
@@ -65,9 +84,8 @@ export function OrderTicket({ symbol, exchange, currentLtp, onOrderPlaced }: Ord
         sl: slPrice,
         tp: tpPrice,
       });
-      setTimeout(() => setStatusMsg(null), 2500);
     } catch {
-      setStatusMsg("Filled (local engine)");
+      // Local execution fallback
       onOrderPlaced?.({
         symbol,
         exchange,
@@ -77,14 +95,13 @@ export function OrderTicket({ symbol, exchange, currentLtp, onOrderPlaced }: Ord
         sl: slPrice,
         tp: tpPrice,
       });
-      setTimeout(() => setStatusMsg(null), 2500);
     }
   };
 
   const qtyPresets = [10, 50, 100, 500];
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full relative">
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-[#1e2740]">
         <span className="text-[11px] font-mono tracking-widest text-[#8494a7] uppercase">Order Entry</span>
@@ -95,7 +112,7 @@ export function OrderTicket({ symbol, exchange, currentLtp, onOrderPlaced }: Ord
       <div className="grid grid-cols-2 border-b border-[#1e2740]">
         <button
           type="button"
-          onClick={() => setSide("BUY")}
+          onClick={() => { setSide("BUY"); setErrorMsg(null); }}
           className={`py-2 text-xs font-semibold tracking-wide transition-colors ${
             side === "BUY"
               ? "bg-[#00c076] text-[#0a0e17]"
@@ -106,7 +123,7 @@ export function OrderTicket({ symbol, exchange, currentLtp, onOrderPlaced }: Ord
         </button>
         <button
           type="button"
-          onClick={() => setSide("SELL")}
+          onClick={() => { setSide("SELL"); setErrorMsg(null); }}
           className={`py-2 text-xs font-semibold tracking-wide transition-colors ${
             side === "SELL"
               ? "bg-[#ff4757] text-[#0a0e17]"
@@ -155,7 +172,12 @@ export function OrderTicket({ symbol, exchange, currentLtp, onOrderPlaced }: Ord
 
         {/* Quantity */}
         <div className="flex flex-col gap-1">
-          <label className="text-[10px] text-[#4a5568] uppercase tracking-wider">Qty</label>
+          <div className="flex items-center justify-between">
+            <label className="text-[10px] text-[#4a5568] uppercase tracking-wider">Qty</label>
+            {side === "SELL" && (
+              <span className="text-[9px] font-mono text-[#8494a7]">Avail: <strong className="text-[#e2e8f0]">{userHoldingQty}</strong></span>
+            )}
+          </div>
           <input
             type="number"
             value={quantity}
@@ -222,23 +244,24 @@ export function OrderTicket({ symbol, exchange, currentLtp, onOrderPlaced }: Ord
           </div>
         </div>
 
-        {/* Submit */}
+        {/* Inline Error Toast (Does not move or shift the button) */}
+        {errorMsg && (
+          <div className="bg-[#ff475715] border border-[#ff475740] text-[#ff4757] text-[10px] font-mono px-2 py-1 rounded text-center">
+            {errorMsg}
+          </div>
+        )}
+
+        {/* Submit Button (Strictly BUY / SELL without displacement or text changes) */}
         <button
           type="submit"
-          className={`mt-auto py-2.5 text-xs font-bold tracking-wider transition-all ${
+          className={`mt-auto py-2.5 text-xs font-bold tracking-wider uppercase transition-all ${
             side === "BUY"
               ? "bg-[#00c076] hover:bg-[#00d884] text-[#0a0e17]"
               : "bg-[#ff4757] hover:bg-[#ff6b78] text-[#0a0e17]"
           }`}
         >
-          {side} {quantity} × {symbol} = ₹{totalCost.toLocaleString("en-IN", { maximumFractionDigits: 0 })}
+          {side}
         </button>
-
-        {statusMsg && (
-          <div className="text-center text-[10px] font-mono text-[#3b82f6] py-1">
-            {statusMsg}
-          </div>
-        )}
       </form>
     </div>
   );

@@ -33,16 +33,11 @@ interface CandlestickChartProps {
   onReset?: () => void;
 }
 
-type Timeframe = "1s" | "5s" | "15s" | "1m" | "5m" | "15m" | "1h";
+type Timeframe = "2m" | "5m";
 
 const TIMEFRAMES: { label: string; value: Timeframe; secs: number }[] = [
-  { label: "1s", value: "1s", secs: 1 },
-  { label: "5s", value: "5s", secs: 5 },
-  { label: "15s", value: "15s", secs: 15 },
-  { label: "1m", value: "1m", secs: 60 },
+  { label: "2m", value: "2m", secs: 120 },
   { label: "5m", value: "5m", secs: 300 },
-  { label: "15m", value: "15m", secs: 900 },
-  { label: "1h", value: "1h", secs: 3600 },
 ];
 
 /** Aggregate raw 1-second candles into a larger timeframe */
@@ -85,12 +80,12 @@ export function CandlestickChart({
   const mainSeriesRef = useRef<ISeriesApi<"Candlestick" | "Line"> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
 
-  const [timeframe, setTimeframe] = useState<Timeframe>("1s");
+  const [timeframe, setTimeframe] = useState<Timeframe>("2m");
   const [activeTool, setActiveTool] = useState<"none" | "horizontal" | "trend">("none");
   const [drawnLines, setDrawnLines] = useState<DrawnLine[]>([]);
   const [isResetting, setIsResetting] = useState(false);
 
-  const tfSecs = TIMEFRAMES.find((t) => t.value === timeframe)?.secs ?? 1;
+  const tfSecs = TIMEFRAMES.find((t) => t.value === timeframe)?.secs ?? 120;
   const displayData = aggregateCandles(data, tfSecs);
 
   // ─── Initialize chart ────────────────────────────────────────────
@@ -115,102 +110,94 @@ export function CandlestickChart({
           color: "#3b82f650",
           width: 1,
           style: LineStyle.Dashed,
-          labelBackgroundColor: "#1a2136",
         },
         horzLine: {
           color: "#3b82f650",
           width: 1,
           style: LineStyle.Dashed,
-          labelBackgroundColor: "#1a2136",
         },
       },
       rightPriceScale: {
         borderColor: "#1e2740",
-        scaleMargins: { top: 0.08, bottom: 0.22 },
-        textColor: "#4a5568",
+        autoScale: true,
       },
       timeScale: {
         borderColor: "#1e2740",
         timeVisible: true,
-        secondsVisible: true,
-        rightOffset: 5,
-        barSpacing: 8,
-        fixLeftEdge: false,
+        secondsVisible: false,
       },
-      handleScale: true,
-      handleScroll: true,
-      width: container.clientWidth,
-      height: container.clientHeight,
     });
 
     chartRef.current = chart;
 
-    // Main price series
-    let mainSeries: ISeriesApi<"Candlestick" | "Line">;
-    if (chartType === "candle") {
-      mainSeries = chart.addSeries(CandlestickSeries, {
-        upColor: "#00c076",
-        downColor: "#ff4757",
-        borderVisible: false,
-        wickUpColor: "#00c07690",
-        wickDownColor: "#ff475790",
-      });
-    } else {
-      mainSeries = chart.addSeries(LineSeries, {
-        color: "#3b82f6",
-        lineWidth: 2,
-      });
-    }
+    const mainSeries =
+      chartType === "candle"
+        ? chart.addSeries(CandlestickSeries, {
+            upColor: "#00c076",
+            downColor: "#ff4757",
+            borderUpColor: "#00c076",
+            borderDownColor: "#ff4757",
+            wickUpColor: "#00c076",
+            wickDownColor: "#ff4757",
+          })
+        : chart.addSeries(LineSeries, {
+            color: "#3b82f6",
+            lineWidth: 2,
+          });
+
+    mainSeriesRef.current = mainSeries as any;
 
     const volumeSeries = chart.addSeries(HistogramSeries, {
+      color: "#1e2740",
       priceFormat: { type: "volume" },
       priceScaleId: "",
     });
     volumeSeries.priceScale().applyOptions({
-      scaleMargins: { top: 0.85, bottom: 0 },
+      scaleMargins: { top: 0.8, bottom: 0 },
     });
-
-    mainSeriesRef.current = mainSeries;
     volumeSeriesRef.current = volumeSeries;
 
-    // Resize observer
-    const ro = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        const { width, height } = entry.contentRect;
-        chart.applyOptions({ width, height });
+    const handleResize = () => {
+      if (chartContainerRef.current) {
+        chart.applyOptions({
+          width: chartContainerRef.current.clientWidth,
+          height: chartContainerRef.current.clientHeight,
+        });
       }
-    });
-    ro.observe(container);
+    };
+    window.addEventListener("resize", handleResize);
 
     return () => {
-      ro.disconnect();
+      window.removeEventListener("resize", handleResize);
       chart.remove();
-      chartRef.current = null;
-      mainSeriesRef.current = null;
-      volumeSeriesRef.current = null;
     };
   }, [chartType]);
 
-  // ─── Update data when displayData or timeframe changes ───────────
+  // ─── Update series data ───────────────────────────────────────────
   useEffect(() => {
-    if (!mainSeriesRef.current || !volumeSeriesRef.current || !displayData.length) return;
-
-    const deduped = new Map<number, CandlePoint>();
-    displayData.forEach((d) => deduped.set(d.time, d));
-    const sorted = Array.from(deduped.values()).sort((a, b) => a.time - b.time);
+    if (!mainSeriesRef.current || !volumeSeriesRef.current || displayData.length === 0) return;
 
     if (chartType === "candle") {
       (mainSeriesRef.current as ISeriesApi<"Candlestick">).setData(
-        sorted.map((d) => ({ time: d.time as any, open: d.open, high: d.high, low: d.low, close: d.close }))
+        displayData.map((d) => ({
+          time: d.time as any,
+          open: d.open,
+          high: d.high,
+          low: d.low,
+          close: d.close,
+        }))
       );
     } else {
       (mainSeriesRef.current as ISeriesApi<"Line">).setData(
-        sorted.map((d) => ({ time: d.time as any, value: d.close }))
+        displayData.map((d) => ({
+          time: d.time as any,
+          value: d.close,
+        }))
       );
     }
 
     volumeSeriesRef.current.setData(
-      sorted.map((d) => ({
+      displayData.map((d) => ({
         time: d.time as any,
         value: d.volume,
         color: d.close >= d.open ? "#00c07630" : "#ff475730",
@@ -299,7 +286,7 @@ export function CandlestickChart({
 
         <div className="w-px h-4 bg-[#1e2740]" />
 
-        {/* Drawing tools */}
+        {/* Horizontal Price Level (S/R) Tool */}
         <button
           onClick={() => setActiveTool((t) => (t === "horizontal" ? "none" : "horizontal"))}
           title="Horizontal Price Level (S/R)"
@@ -310,17 +297,6 @@ export function CandlestickChart({
           }`}
         >
           <Minus className="w-3 h-3" />
-        </button>
-        <button
-          onClick={() => setActiveTool((t) => (t === "trend" ? "none" : "trend"))}
-          title="Trend / Alert Line"
-          className={`p-1.5 rounded text-xs transition-colors border ${
-            activeTool === "trend"
-              ? "bg-[#f59e0b] border-[#f59e0b] text-white"
-              : "border-[#1e2740] text-[#8494a7] hover:bg-[#151b2b]"
-          }`}
-        >
-          <TrendingUp className="w-3 h-3" />
         </button>
         {drawnLines.length > 0 && (
           <button
