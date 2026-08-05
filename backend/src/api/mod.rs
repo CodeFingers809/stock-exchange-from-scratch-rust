@@ -226,6 +226,7 @@ async fn place_order_handler(
 
 pub static HFT_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 pub static HFT_RESET_FLAG: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub static ENGINE_RESET_FLAG: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 async fn reset_handler(
     axum::extract::State(state): axum::extract::State<ApiState>,
@@ -268,6 +269,7 @@ async fn reset_handler(
     SIMULATOR_ACTIVE.store(false, Ordering::Relaxed);
     HFT_ACTIVE.store(false, Ordering::Relaxed);
     HFT_RESET_FLAG.store(true, Ordering::Relaxed);
+    ENGINE_RESET_FLAG.store(true, Ordering::Relaxed);
 
     // Broadcast RESET event across all WebSocket clients
     let reset_msg = serde_json::json!({

@@ -108,11 +108,13 @@ fn spawn_exchange_pair(
     let market_name = exchange_name.clone();
     let shared_ltps_market = shared_ltps.clone();
 
+    let stock_prices_copy = stock_initial_prices.clone();
+
     thread::spawn(move || {
         let mut market = Market::new(market_name.clone());
         let mut sim_map = std::collections::HashMap::new();
 
-        for (sym, px) in stock_initial_prices {
+        for &(sym, px) in &stock_prices_copy {
             let initial_price = Price::from_paisa(px);
             market.add_stock(sym.to_string(), initial_price);
             let sentiment = shared_sentiments.get(sym).unwrap().clone();
@@ -125,6 +127,19 @@ fn spawn_exchange_pair(
         let mut all_round_trip_latencies = Vec::new();
 
         loop {
+            if stock_exchange_rust::api::ENGINE_RESET_FLAG.load(std::sync::atomic::Ordering::Relaxed) {
+                market = Market::new(market_name.clone());
+                sim_map.clear();
+                let mut map = shared_ltps_market.lock().unwrap();
+                for &(sym, px) in &stock_prices_copy {
+                    let initial_price = Price::from_paisa(px);
+                    market.add_stock(sym.to_string(), initial_price);
+                    let sentiment = shared_sentiments.get(sym).unwrap().clone();
+                    sim_map.insert(sym.to_string(), Simulator::new(sym.to_string(), px, sentiment));
+                    map.insert(sym.to_string(), px);
+                }
+            }
+
             let mut step_latencies = Vec::new();
 
             // Process HFT Direct Orders First
@@ -573,6 +588,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 last_db_portfolio_save = Instant::now();
             }
+        }
+
+        if stock_exchange_rust::api::ENGINE_RESET_FLAG.swap(false, std::sync::atomic::Ordering::Relaxed) {
+            // Give exchange threads a tick to process reset
+            tokio::time::sleep(Duration::from_millis(50)).await;
         }
 
         // Broadcast tick updates for ALL stocks to web clients every 100ms
