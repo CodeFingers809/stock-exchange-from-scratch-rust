@@ -227,6 +227,8 @@ async fn place_order_handler(
 pub static HFT_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 pub static HFT_RESET_FLAG: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 pub static ENGINE_RESET_FLAG: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub static SIM_STARTED_AT: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+pub static HFT_STARTED_AT: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
 
 async fn reset_handler(
     axum::extract::State(state): axum::extract::State<ApiState>,
@@ -324,9 +326,12 @@ async fn toggle_sim_handler(
     let next = !current;
     SIMULATOR_ACTIVE.store(next, Ordering::Relaxed);
 
-    // If SIM was turned OFF, also turn OFF HFT automatically
-    if !next {
+    if next {
+        *SIM_STARTED_AT.lock().unwrap() = Some(std::time::Instant::now());
+    } else {
+        *SIM_STARTED_AT.lock().unwrap() = None;
         HFT_ACTIVE.store(false, Ordering::Relaxed);
+        *HFT_STARTED_AT.lock().unwrap() = None;
     }
 
     let sim_active = SIMULATOR_ACTIVE.load(Ordering::Relaxed);
@@ -365,6 +370,12 @@ async fn toggle_hft_handler(
 
     let next = !current_hft;
     HFT_ACTIVE.store(next, Ordering::Relaxed);
+
+    if next {
+        *HFT_STARTED_AT.lock().unwrap() = Some(std::time::Instant::now());
+    } else {
+        *HFT_STARTED_AT.lock().unwrap() = None;
+    }
 
     let hft_active = HFT_ACTIVE.load(Ordering::Relaxed);
 

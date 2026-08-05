@@ -595,6 +595,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
 
+        // Server-side 10-minute (600s) auto-off timer guard for SIM and HFT
+        if stock_exchange_rust::sim::simulator::SIMULATOR_ACTIVE.load(std::sync::atomic::Ordering::Relaxed) {
+            let expired = {
+                let guard = stock_exchange_rust::api::SIM_STARTED_AT.lock().unwrap();
+                guard.as_ref().map(|t| t.elapsed() >= Duration::from_secs(600)).unwrap_or(false)
+            };
+            if expired {
+                println!("[SERVER AUTO-OFF] 10-minute timer expired. Auto-turning OFF Market Simulator & HFT Bot.");
+                stock_exchange_rust::sim::simulator::SIMULATOR_ACTIVE.store(false, std::sync::atomic::Ordering::Relaxed);
+                stock_exchange_rust::api::HFT_ACTIVE.store(false, std::sync::atomic::Ordering::Relaxed);
+                *stock_exchange_rust::api::SIM_STARTED_AT.lock().unwrap() = None;
+                *stock_exchange_rust::api::HFT_STARTED_AT.lock().unwrap() = None;
+            }
+        }
+
+        if stock_exchange_rust::api::HFT_ACTIVE.load(std::sync::atomic::Ordering::Relaxed) {
+            let expired = {
+                let guard = stock_exchange_rust::api::HFT_STARTED_AT.lock().unwrap();
+                guard.as_ref().map(|t| t.elapsed() >= Duration::from_secs(600)).unwrap_or(false)
+            };
+            if expired {
+                println!("[SERVER AUTO-OFF] 10-minute timer expired. Auto-turning OFF HFT Bot.");
+                stock_exchange_rust::api::HFT_ACTIVE.store(false, std::sync::atomic::Ordering::Relaxed);
+                *stock_exchange_rust::api::HFT_STARTED_AT.lock().unwrap() = None;
+            }
+        }
+
         // Broadcast tick updates for ALL stocks to web clients every 100ms
         if last_broadcast_time.elapsed() >= Duration::from_millis(100) {
             let ayush_map = ayush_ltp_ref.lock().unwrap().clone();
