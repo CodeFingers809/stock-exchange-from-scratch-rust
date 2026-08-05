@@ -55,6 +55,10 @@ pub struct StepMetrics {
     pub order_latencies: Vec<Duration>,
 }
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
+pub static SIMULATOR_ACTIVE: AtomicBool = AtomicBool::new(false);
+
 pub struct Simulator {
     pub symbol: String,
     pub initial_reference_price: Price,
@@ -69,10 +73,6 @@ impl Simulator {
             shared_sentiment,
         }
     }
-
-use std::sync::atomic::{AtomicBool, Ordering};
-
-pub static SIMULATOR_ACTIVE: AtomicBool = AtomicBool::new(false);
 
     pub fn step(&mut self, market: &mut Market) -> StepMetrics {
         if !SIMULATOR_ACTIVE.load(Ordering::Relaxed) {
