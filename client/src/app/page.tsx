@@ -785,6 +785,8 @@ export default function TerminalPage() {
                 {tab}
               </button>
             ))}
+          </div>
+
           {/* Tab Content */}
           <div className="flex-1 overflow-y-auto">
             {rightTab === "ORDER" && (
@@ -951,7 +953,6 @@ export default function TerminalPage() {
                 </div>
               </div>
             )}
-          </div>
           </div>
         </aside>
       </div>

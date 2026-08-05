@@ -97,6 +97,13 @@ impl ApiServer {
 async fn get_stocks_handler() -> Json<Vec<WebStockInfo>> {
     Json(vec![
         WebStockInfo {
+            symbol: "AYUSH-5".to_string(),
+            name: "AYUSH-5 Benchmark Index".to_string(),
+            exchanges: vec!["AYUSHSE".to_string()],
+            ltp_ayushse: 2124.39,
+            ltp_bohrase: 2124.39,
+        },
+        WebStockInfo {
             symbol: "TCS".to_string(),
             name: "Tata Consultancy Services".to_string(),
             exchanges: vec!["AYUSHSE".to_string(), "BOHRASE".to_string()],
@@ -130,41 +137,6 @@ async fn get_stocks_handler() -> Json<Vec<WebStockInfo>> {
             exchanges: vec!["AYUSHSE".to_string(), "BOHRASE".to_string()],
             ltp_ayushse: 1120.30,
             ltp_bohrase: 1121.50,
-        },
-        WebStockInfo {
-            symbol: "TATAMOTORS".to_string(),
-            name: "Tata Motors Ltd".to_string(),
-            exchanges: vec!["AYUSHSE".to_string(), "BOHRASE".to_string()],
-            ltp_ayushse: 980.60,
-            ltp_bohrase: 979.80,
-        },
-        WebStockInfo {
-            symbol: "BHARTIARTL".to_string(),
-            name: "Bharti Airtel Ltd".to_string(),
-            exchanges: vec!["AYUSHSE".to_string(), "BOHRASE".to_string()],
-            ltp_ayushse: 1410.25,
-            ltp_bohrase: 1412.00,
-        },
-        WebStockInfo {
-            symbol: "SBIN".to_string(),
-            name: "State Bank of India".to_string(),
-            exchanges: vec!["AYUSHSE".to_string(), "BOHRASE".to_string()],
-            ltp_ayushse: 825.40,
-            ltp_bohrase: 824.90,
-        },
-        WebStockInfo {
-            symbol: "ITC".to_string(),
-            name: "ITC Ltd".to_string(),
-            exchanges: vec!["AYUSHSE".to_string(), "BOHRASE".to_string()],
-            ltp_ayushse: 465.80,
-            ltp_bohrase: 466.15,
-        },
-        WebStockInfo {
-            symbol: "LTIM".to_string(),
-            name: "LTIMindtree Ltd".to_string(),
-            exchanges: vec!["AYUSHSE".to_string(), "BOHRASE".to_string()],
-            ltp_ayushse: 5120.00,
-            ltp_bohrase: 5115.50,
         },
     ])
 }

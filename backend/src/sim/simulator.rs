@@ -121,8 +121,11 @@ impl Simulator {
             let max_offset = (current_ltp.paisa as f64 * 0.005) as i64;
             let clamped_offset = price_offset.clamp(-max_offset, max_offset);
 
-            let raw_paisa = (current_ltp.paisa as i64 + clamped_offset).max(5) as u64;
-            let price_paisa = (raw_paisa / 5) * 5;
+            // Enforce price bounds relative to initial reference price (0.75x min floor, 1.35x max ceiling)
+            let min_paisa = (self.initial_reference_price.paisa as f64 * 0.75) as i64;
+            let max_paisa = (self.initial_reference_price.paisa as f64 * 1.35) as i64;
+            let target_paisa = (current_ltp.paisa as i64 + clamped_offset).clamp(min_paisa, max_paisa) as u64;
+            let price_paisa = ((target_paisa / 5) * 5).max(500);
 
             let order_price = if is_market_order {
                 None
