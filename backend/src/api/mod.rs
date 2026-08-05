@@ -258,12 +258,35 @@ async fn reset_handler(
         Err(e) => errors.push(format!("Redis open: {}", e)),
     }
 
+    use crate::sim::simulator::SIMULATOR_ACTIVE;
+    use std::sync::atomic::Ordering;
+    SIMULATOR_ACTIVE.store(false, Ordering::Relaxed);
+    HFT_ACTIVE.store(false, Ordering::Relaxed);
+
     // Broadcast RESET event across all WebSocket clients
     let reset_msg = serde_json::json!({
         "type": "RESET",
         "message": "Full engine state reset"
     });
     let _ = state.tx.send(reset_msg.to_string());
+
+    // Broadcast clean HFT telemetry reset
+    let clean_hft = serde_json::json!({
+        "type": "HFT_TELEMETRY",
+        "capital": 1000000000.0,
+        "realized_pnl": 0.0,
+        "trades": 0,
+        "wins": 0,
+        "internal_lat_ns": 1400,
+        "internal_med_ns": 1400,
+        "rt_lat_ns": 5590000,
+        "rt_med_ns": 5590000,
+        "spread_paisa": 0,
+        "inventory": 0,
+        "ayushse_ltp": 3450.0,
+        "bohrase_ltp": 3448.5,
+    });
+    let _ = state.tx.send(clean_hft.to_string());
 
     Json(serde_json::json!({
         "status": if errors.is_empty() { "OK" } else { "PARTIAL" },

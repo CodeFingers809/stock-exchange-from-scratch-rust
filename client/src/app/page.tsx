@@ -233,18 +233,17 @@ export default function TerminalPage() {
 
     const updateCandle = (sym: string, ex: string, price: number, timeSec: number) => {
       const key = `${sym}:${ex}`;
-      const randVol = Math.floor(Math.random() * 120) + 10;
       setCandleMap((prev) => {
         const existing = prev[key] || [];
         if (!existing.length) {
-          return { ...prev, [key]: [{ time: timeSec, open: price, high: price, low: price, close: price, volume: randVol }] };
+          return { ...prev, [key]: [{ time: timeSec, open: price, high: price, low: price, close: price, volume: 1 }] };
         }
         const last = existing[existing.length - 1];
         if (last.time === timeSec) {
-          const updated = { ...last, high: Math.max(last.high, price), low: Math.min(last.low, price), close: price, volume: last.volume + randVol };
+          const updated = { ...last, high: Math.max(last.high, price), low: Math.min(last.low, price), close: price, volume: last.volume + 1 };
           return { ...prev, [key]: [...existing.slice(0, -1), updated] };
         } else if (timeSec > last.time) {
-          return { ...prev, [key]: [...existing, { time: timeSec, open: price, high: price, low: price, close: price, volume: randVol }] };
+          return { ...prev, [key]: [...existing, { time: timeSec, open: price, high: price, low: price, close: price, volume: 1 }] };
         }
         return prev;
       });
@@ -269,11 +268,16 @@ export default function TerminalPage() {
         setWsConnected(true);
       };
 
+      let lastTickTime = 0;
       socket.onmessage = (ev) => {
         if (!mounted) return;
         try {
           const msg = JSON.parse(ev.data);
           if (msg.type === "TICK") {
+            const now = Date.now();
+            if (now - lastTickTime < 250 && msg.symbol !== "AYUSH-5") return; // Throttle ticks for readability
+            lastTickTime = now;
+
             const { symbol: sym, ayushse_ltp, bohrase_ltp, med_lat_ns, rt_med_lat_ns, ayushse_bids, ayushse_asks, bohrase_bids, bohrase_asks } = msg;
 
             if (med_lat_ns) setMarketLatNs(med_lat_ns);
@@ -303,7 +307,7 @@ export default function TerminalPage() {
               });
             }
 
-            const nowSec = Math.floor(Date.now() / 1000);
+            const nowSec = Math.floor(now / 1000);
             const minSec = Math.floor(nowSec / 60) * 60;
             if (ayushse_ltp) updateCandle(sym, "AYUSHSE", ayushse_ltp, minSec);
             if (bohrase_ltp) updateCandle(sym, "BOHRASE", bohrase_ltp, minSec);
@@ -323,6 +327,8 @@ export default function TerminalPage() {
             setUserBalance(10_000_000);
             setHft(null);
             setHftHistory([]);
+            setIsSimActive(false);
+            setIsHftActive(false);
           }
         } catch {}
       };

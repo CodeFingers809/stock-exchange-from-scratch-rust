@@ -31,19 +31,22 @@ impl SharedSentiment {
     }
 
     /// Rotate to a wild sentiment regime (20% to 80%) with a slight upside bias (0.47 to 0.57 base).
-    fn rotate(rng: &mut impl rand::Rng, _current_price_vs_ref: f64) -> Self {
-        let buy_prob = if rng.random_bool(0.70) {
-            // Slight upside bias: 47% - 57%
-            rng.random_range(0.47..=0.57_f64)
+    /// Rotate sentiment with mean-reversion pull relative to reference price
+    fn rotate(rng: &mut impl rand::Rng, price_vs_ref: f64) -> Self {
+        // Mean-reversion bias: if price dropped below baseline, boost buy probability (up to 0.70)
+        // If price rose above baseline, lower buy probability (down to 0.30)
+        let base_buy_prob = if price_vs_ref < 0.95 {
+            rng.random_range(0.55..=0.70) // Pull back UP
+        } else if price_vs_ref > 1.05 {
+            rng.random_range(0.30..=0.45) // Pull back DOWN
         } else {
-            // Wild swing: 20% - 80%
-            rng.random_range(0.20..=0.80_f64)
+            rng.random_range(0.40..=0.60) // Balanced random walk
         };
 
         Self {
-            buy_prob,
+            buy_prob: base_buy_prob,
             regime_started_at: Instant::now(),
-            regime_duration: Duration::from_secs_f64(rng.random_range(2.0..=6.0)),
+            regime_duration: Duration::from_secs_f64(rng.random_range(3.0..=8.0)),
         }
     }
 }
@@ -100,25 +103,15 @@ impl Simulator {
             s.buy_prob
         };
 
-        // --- Low speed volume: 1–3 random orders per step tick ---
-        let target_volume: usize = rng.random_range(1..=3);
-
-        let market_order_prob = 0.25_f64;
+        // Low speed volume: 1–2 random orders per step tick
+        let target_volume: usize = rng.random_range(1..=2);
+        let market_order_prob = 0.35_f64;
 
         let mut executed_trades = Vec::new();
         let mut order_latencies = Vec::new();
 
-        // Pivot / support-resistance levels from current LTP
         let ltp_p = current_ltp.paisa as f64;
-        let r1 = Price::from_paisa(((ltp_p * 1.010) / 5.0).round() as u64 * 5);
-        let r2 = Price::from_paisa(((ltp_p * 1.025) / 5.0).round() as u64 * 5);
-        let r3 = Price::from_paisa(((ltp_p * 1.050) / 5.0).round() as u64 * 5);
-        let s1 = Price::from_paisa(((ltp_p * 0.990) / 5.0).round() as u64 * 5);
-        let s2 = Price::from_paisa(((ltp_p * 0.975) / 5.0).round() as u64 * 5);
-        let s3 = Price::from_paisa(((ltp_p * 0.950) / 5.0).round() as u64 * 5);
-
-        // Independent price noise per simulator
-        let std_dev = (current_ltp.paisa as f64 * 0.0015).max(5.0);
+        let std_dev = (ltp_p * 0.0010).max(5.0);
         let normal_dist = Normal::new(0.0, std_dev).unwrap();
 
         let step_start = Instant::now();
@@ -128,16 +121,20 @@ impl Simulator {
             let side = if is_buy { BidOrAsk::Bid } else { BidOrAsk::Ask };
             let is_market_order = rng.random_bool(market_order_prob);
 
-            // Independent price offset per simulator (different std_dev noise seed)
-            let price_offset = normal_dist.sample(&mut rng) as i64;
-            let max_offset = (current_ltp.paisa as f64 * 0.005) as i64;
-            let clamped_offset = price_offset.clamp(-max_offset, max_offset);
+            let price_offset = normal_dist.sample(&mut rng).abs() as i64;
 
-            // Enforce price bounds relative to initial reference price (0.75x min floor, 1.35x max ceiling)
-            let min_paisa = (self.initial_reference_price.paisa as f64 * 0.75) as i64;
-            let max_paisa = (self.initial_reference_price.paisa as f64 * 1.35) as i64;
-            let target_paisa = (current_ltp.paisa as i64 + clamped_offset).clamp(min_paisa, max_paisa) as u64;
-            let price_paisa = ((target_paisa / 5) * 5).max(500);
+            // Symmetric limit order placement:
+            // BUY orders target ltp + small offset (fills asks)
+            // SELL orders target ltp - small offset (hits bids)
+            let raw_paisa = match side {
+                BidOrAsk::Bid => (ltp_p as i64 + price_offset),
+                BidOrAsk::Ask => (ltp_p as i64 - price_offset),
+            };
+
+            let min_paisa = (self.initial_reference_price.paisa as f64 * 0.85) as i64;
+            let max_paisa = (self.initial_reference_price.paisa as f64 * 1.15) as i64;
+            let clamped_paisa = raw_paisa.clamp(min_paisa, max_paisa) as u64;
+            let price_paisa = (clamped_paisa / 5) * 5;
 
             let order_price = if is_market_order {
                 None
