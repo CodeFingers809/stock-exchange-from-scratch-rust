@@ -70,7 +70,19 @@ impl Simulator {
         }
     }
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
+pub static SIMULATOR_ACTIVE: AtomicBool = AtomicBool::new(false);
+
     pub fn step(&mut self, market: &mut Market) -> StepMetrics {
+        if !SIMULATOR_ACTIVE.load(Ordering::Relaxed) {
+            return StepMetrics {
+                trades: Vec::new(),
+                step_latency: Duration::from_micros(1),
+                order_latencies: Vec::new(),
+            };
+        }
+
         let mut rng = rand::rng();
 
         let current_ltp = market

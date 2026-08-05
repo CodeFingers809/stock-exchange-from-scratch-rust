@@ -351,8 +351,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 latest_bohra_tick = Some(tick);
             }
 
-            if let (Some(ref t_a), Some(ref t_b)) = (&latest_ayush_tick, &latest_bohra_tick) {
-                if let Some(telemetry) = hft_engine.on_market_tick(t_a, t_b) {
+            if stock_exchange_rust::api::HFT_ACTIVE.load(std::sync::atomic::Ordering::Relaxed) {
+                if let (Some(ref t_a), Some(ref t_b)) = (&latest_ayush_tick, &latest_bohra_tick) {
+                    if let Some(telemetry) = hft_engine.on_market_tick(t_a, t_b) {
                     let _ = hft_telemetry_tx.send(telemetry.clone());
                     
                     // Broadcast HFT telemetry to Web UI
@@ -372,6 +373,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         "bohrase_ltp": telemetry.bohrase_ltp.paisa as f64 / 100.0,
                     });
                     let _ = ws_broadcast_hft.send(payload.to_string());
+                    }
                 }
             }
         }
@@ -391,13 +393,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(ref pool) = db_pool_opt {
         if let Ok(prices) = pool.load_stock_prices().await {
             for (sym, ex, px) in prices {
-                if ex == "AYUSHSE" {
-                    if let Some(item) = ayush_stocks.iter_mut().find(|(s, _)| *s == sym) {
-                        item.1 = px;
-                    }
-                } else if ex == "BOHRASE" {
-                    if let Some(item) = bohra_stocks.iter_mut().find(|(s, _)| *s == sym) {
-                        item.1 = px;
+                if px >= 50000 { // Only load prices >= ₹500.00
+                    if ex == "AYUSHSE" {
+                        if let Some(item) = ayush_stocks.iter_mut().find(|(s, _)| *s == sym) {
+                            item.1 = px;
+                        }
+                    } else if ex == "BOHRASE" {
+                        if let Some(item) = bohra_stocks.iter_mut().find(|(s, _)| *s == sym) {
+                            item.1 = px;
+                        }
                     }
                 }
             }
@@ -564,12 +568,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let bohra_bids = latest_bohra_state.as_ref().map(|s| s.resting_bids.iter().map(|(p, q, o)| serde_json::json!({ "price": p.paisa as f64 / 100.0, "qty": q, "orders": o })).collect::<Vec<_>>()).unwrap_or_default();
             let bohra_asks = latest_bohra_state.as_ref().map(|s| s.resting_asks.iter().map(|(p, q, o)| serde_json::json!({ "price": p.paisa as f64 / 100.0, "qty": q, "orders": o })).collect::<Vec<_>>()).unwrap_or_default();
 
+            let mut constituent_sum = 0.0;
+            let mut constituent_count = 0;
+
             for (sym, a_paisa) in &ayush_map {
                 let b_paisa = bohra_map.get(sym).cloned().unwrap_or(*a_paisa);
+                let ltp_val = *a_paisa as f64 / 100.0;
+                constituent_sum += ltp_val;
+                constituent_count += 1;
+
                 let tick_payload = serde_json::json!({
                     "type": "TICK",
                     "symbol": sym,
-                    "ayushse_ltp": *a_paisa as f64 / 100.0,
+                    "ayushse_ltp": ltp_val,
                     "bohrase_ltp": b_paisa as f64 / 100.0,
                     "med_lat_ns": ayush_lat,
                     "rt_med_lat_ns": ayush_rt_lat,
@@ -580,6 +591,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     "timestamp": chrono::Utc::now().timestamp_millis()
                 });
                 let _ = ws_broadcast.send(tick_payload.to_string());
+            }
+
+            // Broadcast AYUSH-5 Index calculation tick
+            if constituent_count > 0 {
+                let ayush_5_val = ((constituent_sum / constituent_count as f64) * 100.0).round() / 100.0;
+                let index_payload = serde_json::json!({
+                    "type": "TICK",
+                    "symbol": "AYUSH-5",
+                    "ayushse_ltp": ayush_5_val,
+                    "bohrase_ltp": ayush_5_val,
+                    "med_lat_ns": ayush_lat,
+                    "rt_med_lat_ns": ayush_rt_lat,
+                    "ayushse_bids": [],
+                    "ayushse_asks": [],
+                    "bohrase_bids": [],
+                    "bohrase_asks": [],
+                    "timestamp": chrono::Utc::now().timestamp_millis()
+                });
+                let _ = ws_broadcast.send(index_payload.to_string());
             }
 
             last_broadcast_time = Instant::now();

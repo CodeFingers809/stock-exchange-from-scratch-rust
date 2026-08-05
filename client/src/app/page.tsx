@@ -127,11 +127,33 @@ export default function TerminalPage() {
     return () => document.removeEventListener("visibilitychange", handleVisibility);
   }, []);
 
+  const toggleSim = async () => {
+    try {
+      const backendHost = process.env.NEXT_PUBLIC_API_URL || "";
+      const res = await fetch(`${backendHost}/api/sim/toggle`, { method: "POST" });
+      const data = await res.json();
+      setIsSimActive(data.active);
+    } catch {
+      setIsSimActive((prev) => !prev);
+    }
+  };
+
+  const toggleHft = async () => {
+    try {
+      const backendHost = process.env.NEXT_PUBLIC_API_URL || "";
+      const res = await fetch(`${backendHost}/api/hft/toggle`, { method: "POST" });
+      const data = await res.json();
+      setIsHftActive(data.active);
+    } catch {
+      setIsHftActive((prev) => !prev);
+    }
+  };
+
   useEffect(() => {
     if (isSimActive) {
       if (simTimerRef.current) clearTimeout(simTimerRef.current);
       simTimerRef.current = setTimeout(() => {
-        setIsSimActive(false);
+        toggleSim();
       }, 10 * 60 * 1000); // 10 minutes auto-off
     } else {
       if (simTimerRef.current) clearTimeout(simTimerRef.current);
@@ -142,7 +164,7 @@ export default function TerminalPage() {
     if (isHftActive) {
       if (hftTimerRef.current) clearTimeout(hftTimerRef.current);
       hftTimerRef.current = setTimeout(() => {
-        setIsHftActive(false);
+        toggleHft();
       }, 10 * 60 * 1000); // 10 minutes auto-off
     } else {
       if (hftTimerRef.current) clearTimeout(hftTimerRef.current);
@@ -553,7 +575,7 @@ export default function TerminalPage() {
               <div className="flex items-center gap-3 font-mono text-[10px]">
                 {/* Simulator On/Off Toggle */}
                 <button
-                  onClick={() => setIsSimActive(!isSimActive)}
+                  onClick={toggleSim}
                   className={`px-2 py-0.5 text-[9px] font-mono rounded border transition-colors flex items-center gap-1.5 ${
                     isSimActive
                       ? "bg-[#00c07620] border-[#00c076] text-[#00c076]"
@@ -884,7 +906,7 @@ export default function TerminalPage() {
                 <div className="flex items-center justify-between">
                   <div className="text-[10px] font-mono tracking-widest text-[#3b82f6] uppercase">HFT Bot Telemetry</div>
                   <button
-                    onClick={() => setIsHftActive(!isHftActive)}
+                    onClick={toggleHft}
                     className={`px-2 py-0.5 text-[9px] font-mono rounded border transition-colors flex items-center gap-1 ${
                       isHftActive
                         ? "bg-[#3b82f620] border-[#3b82f6] text-[#3b82f6]"

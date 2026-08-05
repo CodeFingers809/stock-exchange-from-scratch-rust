@@ -62,6 +62,8 @@ impl ApiServer {
             .route("/api/candles", get(get_candles_handler))
             .route("/api/order", post(place_order_handler))
             .route("/api/reset", post(reset_handler))
+            .route("/api/sim/toggle", post(toggle_sim_handler))
+            .route("/api/hft/toggle", post(toggle_hft_handler))
             .route("/ws", get(ws_handler))
             .layer(SetResponseHeaderLayer::overriding(
                 header::X_FRAME_OPTIONS,
@@ -267,6 +269,35 @@ async fn reset_handler(
         "status": if errors.is_empty() { "OK" } else { "PARTIAL" },
         "cleared": cleared,
         "errors": errors,
+    }))
+}
+
+async fn toggle_sim_handler() -> Json<serde_json::Value> {
+    use crate::sim::simulator::SIMULATOR_ACTIVE;
+    use std::sync::atomic::Ordering;
+
+    let current = SIMULATOR_ACTIVE.load(Ordering::Relaxed);
+    let next = !current;
+    SIMULATOR_ACTIVE.store(next, Ordering::Relaxed);
+
+    Json(serde_json::json!({
+        "status": "OK",
+        "active": next
+    }))
+}
+
+pub static HFT_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+async fn toggle_hft_handler() -> Json<serde_json::Value> {
+    use std::sync::atomic::Ordering;
+
+    let current = HFT_ACTIVE.load(Ordering::Relaxed);
+    let next = !current;
+    HFT_ACTIVE.store(next, Ordering::Relaxed);
+
+    Json(serde_json::json!({
+        "status": "OK",
+        "active": next
     }))
 }
 
