@@ -656,6 +656,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let _ = ws_broadcast.send(index_payload.to_string());
             }
 
+            // Broadcast server settings state update continuously over WebSocket
+            let is_sim = stock_exchange_rust::sim::simulator::SIMULATOR_ACTIVE.load(std::sync::atomic::Ordering::Relaxed);
+            let is_hft = stock_exchange_rust::api::HFT_ACTIVE.load(std::sync::atomic::Ordering::Relaxed);
+            let state_payload = serde_json::json!({
+                "type": "STATE_UPDATE",
+                "is_sim_active": is_sim,
+                "is_hft_active": is_hft,
+            });
+            let _ = ws_broadcast.send(state_payload.to_string());
+
             last_broadcast_time = Instant::now();
         }
     }

@@ -158,34 +158,12 @@ export default function TerminalPage() {
     }
   };
 
-  useEffect(() => {
-    if (isSimActive) {
-      if (simTimerRef.current) clearTimeout(simTimerRef.current);
-      simTimerRef.current = setTimeout(() => {
-        toggleSim();
-      }, 10 * 60 * 1000); // 10 minutes auto-off
-    } else {
-      if (simTimerRef.current) clearTimeout(simTimerRef.current);
-    }
-  }, [isSimActive]);
-
   const handleReset = async () => {
     try {
       const backendHost = process.env.NEXT_PUBLIC_API_URL || "";
       await fetch(`${backendHost}/api/reset`, { method: "POST" });
     } catch {}
   };
-
-  useEffect(() => {
-    if (isHftActive) {
-      if (hftTimerRef.current) clearTimeout(hftTimerRef.current);
-      hftTimerRef.current = setTimeout(() => {
-        toggleHft();
-      }, 10 * 60 * 1000); // 10 minutes auto-off
-    } else {
-      if (hftTimerRef.current) clearTimeout(hftTimerRef.current);
-    }
-  }, [isHftActive]);
 
   // Clock tick – initialised inside useEffect to avoid SSR/client hydration mismatch
   useEffect(() => {
