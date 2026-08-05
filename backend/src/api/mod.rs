@@ -223,6 +223,9 @@ async fn place_order_handler(
     ).into_response()
 }
 
+pub static HFT_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub static HFT_RESET_FLAG: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 async fn reset_handler(
     axum::extract::State(state): axum::extract::State<ApiState>,
 ) -> Json<serde_json::Value> {
@@ -238,9 +241,10 @@ async fn reset_handler(
             "DELETE FROM holdings",
         ];
         for sql in &tables {
-            match sqlx::query(sql).execute(&pool).await {
-                Ok(_) => cleared.push(sql.to_string()),
-                Err(e) => errors.push(format!("{}: {}", sql, e)),
+            if let Err(e) = sqlx::query(sql).execute(&pool).await {
+                errors.push(format!("{}: {}", sql, e));
+            } else {
+                cleared.push(sql.to_string());
             }
         }
     }
@@ -262,6 +266,7 @@ async fn reset_handler(
     use std::sync::atomic::Ordering;
     SIMULATOR_ACTIVE.store(false, Ordering::Relaxed);
     HFT_ACTIVE.store(false, Ordering::Relaxed);
+    HFT_RESET_FLAG.store(true, Ordering::Relaxed);
 
     // Broadcast RESET event across all WebSocket clients
     let reset_msg = serde_json::json!({
@@ -277,6 +282,7 @@ async fn reset_handler(
         "realized_pnl": 0.0,
         "trades": 0,
         "wins": 0,
+        "tps": 0,
         "internal_lat_ns": 1400,
         "internal_med_ns": 1400,
         "rt_lat_ns": 5590000,

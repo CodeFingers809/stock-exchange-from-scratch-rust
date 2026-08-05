@@ -341,39 +341,59 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let ws_broadcast_hft = ws_broadcast.clone();
     thread::spawn(move || {
-        let mut latest_ayush_tick: Option<stock_exchange_rust::hft::MarketSubscriptionTick> = None;
-        let mut latest_bohra_tick: Option<stock_exchange_rust::hft::MarketSubscriptionTick> = None;
+        let mut ayush_ticks: std::collections::HashMap<String, stock_exchange_rust::hft::MarketSubscriptionTick> = std::collections::HashMap::new();
+        let mut bohra_ticks: std::collections::HashMap<String, stock_exchange_rust::hft::MarketSubscriptionTick> = std::collections::HashMap::new();
+
+        let mut last_tps_check = Instant::now();
+        let mut trades_at_last_check = 0u64;
+        let mut current_tps = 0u64;
 
         while let Ok(tick) = hft_tick_rx.recv() {
+            let sym = tick.symbol.clone();
             if tick.exchange_name == "AYUSHSE" {
-                latest_ayush_tick = Some(tick);
+                ayush_ticks.insert(sym.clone(), tick);
             } else if tick.exchange_name == "BOHRASE" {
-                latest_bohra_tick = Some(tick);
+                bohra_ticks.insert(sym.clone(), tick);
             }
 
             if stock_exchange_rust::api::HFT_ACTIVE.load(std::sync::atomic::Ordering::Relaxed) {
-                if let (Some(ref t_a), Some(ref t_b)) = (&latest_ayush_tick, &latest_bohra_tick) {
+                if let (Some(t_a), Some(t_b)) = (ayush_ticks.get(&sym), bohra_ticks.get(&sym)) {
                     if let Some(telemetry) = hft_engine.on_market_tick(t_a, t_b) {
-                    let _ = hft_telemetry_tx.send(telemetry.clone());
-                    
-                    // Broadcast HFT telemetry to Web UI
-                    let payload = serde_json::json!({
-                        "type": "HFT_TELEMETRY",
-                        "capital": telemetry.total_balance_rupees,
-                        "realized_pnl": telemetry.realized_pnl_rupees,
-                        "trades": telemetry.total_trades,
-                        "wins": telemetry.winning_trades,
-                        "internal_lat_ns": telemetry.hft_internal_latency.as_nanos(),
-                        "internal_med_ns": telemetry.hft_median_latency.as_nanos(),
-                        "rt_lat_ns": telemetry.hft_round_trip_latency.as_nanos(),
-                        "rt_med_ns": telemetry.hft_median_round_trip_latency.as_nanos(),
-                        "spread_paisa": telemetry.current_spread_paisa,
-                        "inventory": telemetry.unified_inventory,
-                        "ayushse_ltp": telemetry.ayushse_ltp.paisa as f64 / 100.0,
-                        "bohrase_ltp": telemetry.bohrase_ltp.paisa as f64 / 100.0,
-                    });
-                    let _ = ws_broadcast_hft.send(payload.to_string());
+                        let elapsed_sec = last_tps_check.elapsed().as_secs_f64();
+                        if elapsed_sec >= 1.0 {
+                            let diff = telemetry.total_trades.saturating_sub(trades_at_last_check);
+                            current_tps = (diff as f64 / elapsed_sec).round() as u64;
+                            trades_at_last_check = telemetry.total_trades;
+                            last_tps_check = Instant::now();
+                        }
+
+                        let _ = hft_telemetry_tx.send(telemetry.clone());
+
+                        let payload = serde_json::json!({
+                            "type": "HFT_TELEMETRY",
+                            "capital": telemetry.total_balance_rupees,
+                            "realized_pnl": telemetry.realized_pnl_rupees,
+                            "trades": telemetry.total_trades,
+                            "wins": telemetry.winning_trades,
+                            "tps": current_tps,
+                            "internal_lat_ns": telemetry.hft_internal_latency.as_nanos(),
+                            "internal_med_ns": telemetry.hft_median_latency.as_nanos(),
+                            "rt_lat_ns": telemetry.hft_round_trip_latency.as_nanos(),
+                            "rt_med_ns": telemetry.hft_median_round_trip_latency.as_nanos(),
+                            "spread_paisa": telemetry.current_spread_paisa,
+                            "inventory": telemetry.unified_inventory,
+                            "ayushse_ltp": telemetry.ayushse_ltp.paisa as f64 / 100.0,
+                            "bohrase_ltp": telemetry.bohrase_ltp.paisa as f64 / 100.0,
+                        });
+                        let _ = ws_broadcast_hft.send(payload.to_string());
                     }
+                }
+            } else {
+                // If reset happened, reset hft_engine
+                if stock_exchange_rust::api::HFT_RESET_FLAG.swap(false, std::sync::atomic::Ordering::Relaxed) {
+                    hft_engine.reset();
+                    trades_at_last_check = 0;
+                    current_tps = 0;
                 }
             }
         }

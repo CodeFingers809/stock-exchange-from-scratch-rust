@@ -80,6 +80,15 @@ impl CrossExchangeArbitrage {
         }
     }
 
+    pub fn reset(&mut self) {
+        self.winning_trades = 0;
+        self.losing_trades = 0;
+        self.total_executed_arbitrages = 0;
+        let mut port = self.user.portfolio.lock().unwrap();
+        port.cash_balance = 100_000_000_000; // ₹100 Cr (10^11 paisa)
+        port.holdings.clear();
+    }
+
     /// Cross-exchange arbitrage using ACTUAL actionable prices.
     ///
     /// Spread = best_bid(sell_exchange) - best_ask(buy_exchange)
@@ -149,8 +158,9 @@ impl CrossExchangeArbitrage {
             if let Some((buy_tick, sell_tick, buy_price, sell_price, net_paisa)) = chosen {
                 let qty = self.max_trade_size;
 
+                let current_sym = tick_a.symbol.clone();
                 opportunity = Some(ArbitrageOpportunity {
-                    symbol: self.symbol.clone(),
+                    symbol: current_sym.clone(),
                     buy_exchange: buy_tick.exchange_name.clone(),
                     sell_exchange: sell_tick.exchange_name.clone(),
                     buy_price,
@@ -163,7 +173,7 @@ impl CrossExchangeArbitrage {
 
                 // Market BUY on cheap exchange — fills at their best_ask
                 let buy_order = Order::new(
-                    self.symbol.clone(),
+                    current_sym.clone(),
                     None,
                     qty,
                     BidOrAsk::Bid,
@@ -172,7 +182,7 @@ impl CrossExchangeArbitrage {
 
                 // Market SELL on expensive exchange — fills at their best_bid
                 let sell_order = Order::new(
-                    self.symbol.clone(),
+                    current_sym.clone(),
                     None,
                     qty,
                     BidOrAsk::Ask,
@@ -191,6 +201,8 @@ impl CrossExchangeArbitrage {
         // 2. HFT Self-Flushing / Inventory Unloading Algorithm
         // If no arb trade occurred this tick AND we have excess inventory (unhedged long/short position),
         // flush/rebalance the open position into the exchange with the best bid/ask.
+        let current_sym = tick_a.symbol.clone();
+        let current_inventory = self.user.total_shares(&current_sym);
         if !trade_executed && current_inventory != 0 {
             let acc_no = self.user.account_number();
 
@@ -208,7 +220,7 @@ impl CrossExchangeArbitrage {
                 };
 
                 let sell_flush_order = Order::new(
-                    self.symbol.clone(),
+                    current_sym.clone(),
                     None,
                     flush_qty,
                     BidOrAsk::Ask,
@@ -230,7 +242,7 @@ impl CrossExchangeArbitrage {
                 };
 
                 let buy_flush_order = Order::new(
-                    self.symbol.clone(),
+                    current_sym.clone(),
                     None,
                     flush_qty,
                     BidOrAsk::Bid,

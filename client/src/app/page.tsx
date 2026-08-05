@@ -18,6 +18,7 @@ interface HftTelemetry {
   realized_pnl: number;
   trades: number;
   wins: number;
+  tps?: number;
   internal_lat_ns: number;
   internal_med_ns: number;
   rt_lat_ns: number;
@@ -945,6 +946,10 @@ export default function TerminalPage() {
                   <div className="flex justify-between text-[10px] font-mono">
                     <span className="text-[#4a5568]">Total Trades</span>
                     <span className="text-[#e2e8f0] tabular-nums">{(hft?.trades || 0).toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between text-[10px] font-mono">
+                    <span className="text-[#4a5568]">Execution Speed</span>
+                    <span className="text-[#3b82f6] font-semibold tabular-nums">{hft?.tps || 0} trades/sec</span>
                   </div>
                   <div className="flex justify-between text-[10px] font-mono">
                     <span className="text-[#4a5568]">Winning Trades</span>
