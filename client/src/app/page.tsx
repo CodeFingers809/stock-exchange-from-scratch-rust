@@ -231,19 +231,15 @@ export default function TerminalPage() {
     const connect = () => {
       if (!mounted) return;
       let wsUrl = process.env.NEXT_PUBLIC_WS_URL;
-      if (!wsUrl) {
-        // In local development or when pointing to local Rust backend:
-        const isLocal = typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
-        if (isLocal) {
-          const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      if (!wsUrl && typeof window !== "undefined") {
+        const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+        if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
           wsUrl = `${wsProtocol}//localhost:3001/ws`;
         } else {
-          // Deployed on Vercel: Vercel serverless does NOT support persistent WebSocket connections or running long-lived Rust backend processes on the same origin.
-          // Fall back to local WS host so client can still connect to local Rust engine if running.
-          wsUrl = "ws://localhost:3001/ws";
+          wsUrl = `${wsProtocol}//${window.location.host}/ws`;
         }
       }
-      const socket = new WebSocket(wsUrl);
+      const socket = new WebSocket(wsUrl || "ws://localhost:3001/ws");
       wsRef.current = socket;
 
       socket.onopen = () => {
@@ -789,8 +785,8 @@ export default function TerminalPage() {
                 {tab}
               </button>
             ))}
-          </div>
-
+          {/* Tab Content */}
+          <div className="flex-1 overflow-y-auto">
             {rightTab === "ORDER" && (
               activePanel?.symbol === "AYUSH-5" ? (
                 <div className="p-4 text-center font-mono flex flex-col items-center justify-center h-full gap-2 text-[#4a5568]">
@@ -953,9 +949,9 @@ export default function TerminalPage() {
                     <span className="text-[#f59e0b] tabular-nums">{formatLatency(hft?.rt_med_ns || 0)}</span>
                   </div>
                 </div>
-
               </div>
             )}
+          </div>
           </div>
         </aside>
       </div>
