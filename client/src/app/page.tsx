@@ -54,11 +54,11 @@ type BottomTab = "ORDERS" | "HOLDINGS";
 
 const INITIAL_STOCKS: StockItem[] = [
   { symbol: "AYUSH-5", name: "AYUSH-5 Benchmark Index", exchanges: ["AYUSHSE"], ltp_ayushse: 2124.39, ltp_bohrase: 2124.39 },
-  { symbol: "TCS", name: "Tata Consultancy Services", exchanges: ["AYUSHSE", "BOHRASE"], ltp_ayushse: 3450.00, ltp_bohrase: 3448.50 },
-  { symbol: "RELIANCE", name: "Reliance Industries Ltd", exchanges: ["AYUSHSE", "BOHRASE"], ltp_ayushse: 2890.50, ltp_bohrase: 2892.10 },
-  { symbol: "INFY", name: "Infosys Ltd", exchanges: ["AYUSHSE", "BOHRASE"], ltp_ayushse: 1520.40, ltp_bohrase: 1518.90 },
-  { symbol: "HDFCBANK", name: "HDFC Bank Ltd", exchanges: ["AYUSHSE", "BOHRASE"], ltp_ayushse: 1640.75, ltp_bohrase: 1642.00 },
-  { symbol: "ICICIBANK", name: "ICICI Bank Ltd", exchanges: ["AYUSHSE", "BOHRASE"], ltp_ayushse: 1120.30, ltp_bohrase: 1121.50 },
+  { symbol: "TCS", name: "Tata Consultancy Services", exchanges: ["AYUSHSE", "BOHRASE"], ltp_ayushse: 3450.00, ltp_bohrase: 3450.00 },
+  { symbol: "RELIANCE", name: "Reliance Industries Ltd", exchanges: ["AYUSHSE", "BOHRASE"], ltp_ayushse: 2890.50, ltp_bohrase: 2890.50 },
+  { symbol: "INFY", name: "Infosys Ltd", exchanges: ["AYUSHSE", "BOHRASE"], ltp_ayushse: 1520.40, ltp_bohrase: 1520.40 },
+  { symbol: "HDFCBANK", name: "HDFC Bank Ltd", exchanges: ["AYUSHSE", "BOHRASE"], ltp_ayushse: 1640.75, ltp_bohrase: 1640.75 },
+  { symbol: "ICICIBANK", name: "ICICI Bank Ltd", exchanges: ["AYUSHSE", "BOHRASE"], ltp_ayushse: 1120.30, ltp_bohrase: 1120.30 },
 ];
 
 /* ────────────────────── HELPERS ────────────────────── */

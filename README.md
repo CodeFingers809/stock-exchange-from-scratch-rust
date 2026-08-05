@@ -1,6 +1,6 @@
 # Multi-Exchange Order Matching Engine & Cross-Exchange Arbitrage Simulator (Rust)
 
-A from-scratch limit order book, matching engine, and cross-exchange arbitrage bot, written in Rust with a live terminal dashboard. Built as a systems-programming exercise in low-latency order matching, lock-free state management, and concurrent market simulation — not a production trading system.
+A from-scratch limit order book, matching engine, and cross-exchange arbitrage bot, written in Rust with a live web dashboard. Built as a systems-programming exercise in low-latency order matching, lock-free state management, and concurrent market simulation — not a production trading system.
 
 ---
 
@@ -15,25 +15,31 @@ The goal was to implement the core mechanics correctly (price-time priority matc
 ## Architecture
 
 ### Order Book & Matching Engine
-- Price-priority FIFO matching using `BTreeMap` for O(log K) price-level lookup and O(1) queue pop on execution, where K is the number of distinct price levels.
-- Thread-safe order state via `Arc<Mutex<OrderInner>>`, so order book and portfolio views observe consistent state without duplicating data.
-- Pre-trade risk checks: validates available cash on buy orders and available holdings on sell orders before an order is routed to the book.
+- **Price-time priority matching** using `BTreeMap` for $O(\log K)$ price-level lookup and $O(1)$ queue pop on execution, where $K$ is the number of distinct price levels.
+- **Thread-safe order state** via `Arc<Mutex<OrderInner>>`, so order book and portfolio views observe consistent state without duplicating data.
+- **Pre-trade risk checks**: validates available cash on buy orders and available holdings on sell orders before an order is routed to the book.
 
 ### Bracket Orders (Parent + Stop-Loss + Take-Profit)
 - Parent, stop-loss, and take-profit orders share state through an atomic reference-counted flag (`Arc<AtomicBool>`).
 - When the parent fills, the SL/TP children activate in constant time — no scan over the order queue is required.
-- One-Cancels-the-Other (OCO) behavior: when either exit order triggers or is cancelled, the sibling updates atomically without a lock-based traversal.
+- **One-Cancels-the-Other (OCO)** behavior: when either exit order triggers or is cancelled, the sibling updates atomically without a lock-based traversal.
 
 ### Cross-Exchange Arbitrage Bot
-- Monitors L2 (top-of-book depth) from both simulated exchanges concurrently.
-- Executes a two-leg trade only when `best_bid(Exchange B) − best_ask(Exchange A)` is positive after accounting for the simulated spread, i.e. a strictly profitable synthetic arbitrage.
+- Monitors L2 (top-of-book depth) from both simulated exchanges concurrently across all constituent stocks.
+- Executes a two-leg trade only when `best_bid(Exchange B) − best_ask(Exchange A)` is positive after accounting for the simulated spread.
 - Includes an inventory-rebalancing routine that detects unhedged partial fills (one leg filled, the other didn't) and unwinds the excess position against the opposite exchange's best resting quote.
 
-### Terminal Dashboard
-- Built with `ratatui` + `crossterm`.
-- Displays both exchanges' top-5 bid/ask depth and last-traded price side by side.
-- Rolling price chart using Braille-character sub-pixel rendering for smoother terminal-native line charts.
-- Live PnL, win/loss counters, and rolling median latency stats for the arbitrage bot.
+### Market Data Persistence & Real-Time Event Pipeline
+- **SQLite Storage**: Persistent storage of order books, trades, portfolio balances, and 1-minute OHLCV candles with WAL (Write-Ahead Logging) mode.
+- **Redis Streams Publisher**: Non-blocking asynchronous event pipeline streaming trade events for external consumption.
+- **WebSocket Broadcast Engine**: Sub-millisecond tick broadcast broadcasting order book L2 depth, last-traded prices, and HFT telemetry updates.
+
+### Benchmark Index (`AYUSH-5`)
+- Dynamically calculated benchmark index tracking the top 5 constituent stocks (`TCS`, `RELIANCE`, `INFY`, `HDFCBANK`, `ICICIBANK`).
+- Computes exchange-specific benchmark ticks independently for `AYUSHSE` and `BOHRASE`.
+
+### Terminal Interface (TUI Mode)
+- Built with `ratatui` + `crossterm` as a lightweight CLI alternative to the web frontend.
 
 ---
 
@@ -54,22 +60,72 @@ These are **micro-benchmarks of in-process function latency**, measured on synth
 
 ## Tech Stack
 
-- **Language**: Rust (2021 edition)
-- **Concurrency**: `std::sync::mpsc` channels, `Arc<Mutex<_>>`, `Arc<AtomicBool>`
-- **Terminal UI**: `ratatui`, `crossterm`
-- **Market simulation**: `rand_distr` (Gaussian/normal order-size distributions)
+### Core Engine & Backend (Rust)
+- **Rust (2021 Edition)**: High-performance memory-safe systems language.
+- **Axum**: Asynchronous web framework for high-throughput REST API endpoints and WebSocket servers.
+- **Tokio**: Multi-threaded asynchronous I/O runtime for concurrency and background tasks.
+- **SQLx (SQLite)**: Asynchronous SQL toolkit for database queries, schema migrations, and persistent WAL storage.
+- **Redis Streams (`redis-rs`)**: High-speed message broker for async event streaming.
+- **Serde / Serde JSON**: Zero-copy serialization and deserialization for JSON payloads and IPC.
+- **Ratatui & Crossterm**: Terminal User Interface (TUI) libraries for terminal rendering.
 
-## What's not here (yet)
+### Frontend Dashboard (TypeScript & React)
+- **Next.js 15 (App Router)**: Framework for React applications built with static export (`output: 'export'`).
+- **React 19 & TypeScript**: Type-safe component UI architecture.
+- **TradingView Lightweight Charts (`lightweight-charts`)**: Canvas-rendered financial charts for real-time candlestick and line series.
+- **TailwindCSS**: CSS design system with custom dark mode and glassmorphism styling.
+- **Lucide React**: Modern iconography library.
 
-- No real market data ingestion.
-- No persistence — state is in-memory only.
-- No network layer between the two "exchanges"; they run in the same process.
-- No tests directory yet — see `TODO.md`.
+### Deployment & Infrastructure
+- **AWS EC2 (Amazon Linux 2023)**: Cloud virtual machine hosting both backend binary and frontend static assets.
+- **Nginx**: High-performance reverse proxy handling SSL termination (`TLS v1.2/v1.3`), WebSocket upgrading, and zero-overhead static asset serving.
+- **Systemd**: Linux service manager for daemonizing and managing process lifecycle.
 
-## Running it
+---
+
+## Running It
+
+### Prerequisites
+- **Rust** (1.75+ recommended): `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
+- **Node.js** (v18+ recommended): for frontend dashboard build
+- **Redis Server** (optional): for streaming event pipeline
+
+### 1. Running the Backend Server
+From the repository root:
 
 ```bash
-cargo run
+# Build and run the matching engine & API server
+cd backend
+cargo run --release
 ```
 
-See `.env.example` for configurable simulation parameters.
+The matching engine will initialize SQLite database storage and start listening for API and WebSocket requests on `http://localhost:3001`.
+
+### 2. Running in Terminal Mode (TUI)
+If you prefer terminal visualization instead of the web dashboard:
+
+```bash
+cd backend
+cargo run --release -- tui
+```
+
+### 3. Running the Web Frontend Dashboard
+From the repository root:
+
+```bash
+cd client
+npm install
+npm run dev
+```
+
+Open `http://localhost:3000` in your web browser.
+
+### 4. Production Build & Export
+To compile the frontend static export:
+
+```bash
+cd client
+npm run build
+```
+
+The optimized static build will be generated in `client/out/`, ready to be served by Nginx or any web server.
