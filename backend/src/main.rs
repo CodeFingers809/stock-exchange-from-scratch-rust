@@ -383,11 +383,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ("INFY", 152040u64),
         ("HDFCBANK", 164075u64),
         ("ICICIBANK", 112030u64),
-        ("TATAMOTORS", 98060u64),
-        ("BHARTIARTL", 141025u64),
-        ("SBIN", 82540u64),
-        ("ITC", 46580u64),
-        ("LTIM", 512000u64),
     ];
 
     let mut ayush_stocks = stock_list.clone();

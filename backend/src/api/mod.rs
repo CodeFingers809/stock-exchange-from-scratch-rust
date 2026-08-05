@@ -284,6 +284,13 @@ async fn reset_handler(
         Err(e) => errors.push(format!("Redis open: {}", e)),
     }
 
+    // Broadcast RESET event across all WebSocket clients
+    let reset_msg = serde_json::json!({
+        "type": "RESET",
+        "message": "Full engine state reset"
+    });
+    let _ = state.tx.send(reset_msg.to_string());
+
     Json(serde_json::json!({
         "status": if errors.is_empty() { "OK" } else { "PARTIAL" },
         "cleared": cleared,

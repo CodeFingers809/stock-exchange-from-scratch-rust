@@ -52,16 +52,12 @@ type RightTab = "ORDER" | "ACCOUNT" | "HFT";
 type BottomTab = "ORDERS" | "HOLDINGS";
 
 const INITIAL_STOCKS: StockItem[] = [
+  { symbol: "AYUSH-5", name: "AYUSH-5 Benchmark Index", exchanges: ["AYUSHSE"], ltp_ayushse: 2124.39, ltp_bohrase: 2124.39 },
   { symbol: "TCS", name: "Tata Consultancy Services", exchanges: ["AYUSHSE", "BOHRASE"], ltp_ayushse: 3450.00, ltp_bohrase: 3448.50 },
   { symbol: "RELIANCE", name: "Reliance Industries Ltd", exchanges: ["AYUSHSE", "BOHRASE"], ltp_ayushse: 2890.50, ltp_bohrase: 2892.10 },
   { symbol: "INFY", name: "Infosys Ltd", exchanges: ["AYUSHSE", "BOHRASE"], ltp_ayushse: 1520.40, ltp_bohrase: 1518.90 },
   { symbol: "HDFCBANK", name: "HDFC Bank Ltd", exchanges: ["AYUSHSE", "BOHRASE"], ltp_ayushse: 1640.75, ltp_bohrase: 1642.00 },
   { symbol: "ICICIBANK", name: "ICICI Bank Ltd", exchanges: ["AYUSHSE", "BOHRASE"], ltp_ayushse: 1120.30, ltp_bohrase: 1121.50 },
-  { symbol: "TATAMOTORS", name: "Tata Motors Ltd", exchanges: ["AYUSHSE", "BOHRASE"], ltp_ayushse: 980.60, ltp_bohrase: 979.80 },
-  { symbol: "BHARTIARTL", name: "Bharti Airtel Ltd", exchanges: ["AYUSHSE", "BOHRASE"], ltp_ayushse: 1410.25, ltp_bohrase: 1412.00 },
-  { symbol: "SBIN", name: "State Bank of India", exchanges: ["AYUSHSE", "BOHRASE"], ltp_ayushse: 825.40, ltp_bohrase: 824.90 },
-  { symbol: "ITC", name: "ITC Ltd", exchanges: ["AYUSHSE", "BOHRASE"], ltp_ayushse: 465.80, ltp_bohrase: 466.15 },
-  { symbol: "LTIM", name: "LTIMindtree Ltd", exchanges: ["AYUSHSE", "BOHRASE"], ltp_ayushse: 5120.00, ltp_bohrase: 5115.50 },
 ];
 
 /* ────────────────────── HELPERS ────────────────────── */
@@ -114,15 +110,17 @@ export default function TerminalPage() {
   const [chartType, setChartType] = useState<"candle" | "line">("candle");
   const [orderbooks, setOrderbooks] = useState<Record<string, { bids: { price: number; qty: number; orders: number }[]; asks: { price: number; qty: number; orders: number }[] }>>({});
   const [isSimActive, setIsSimActive] = useState(false);
-  const [isHftActive, setIsHftActive] = useState(true);
+  const [isHftActive, setIsHftActive] = useState(false);
   const simTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
 
-  // Auto turn-off simulator on tab change or after 10 mins
+  // Auto turn-off simulator & HFT on tab change or after 10 mins
   useEffect(() => {
     const handleVisibility = () => {
       if (document.hidden) {
         setIsSimActive(false);
+        setIsHftActive(false);
       }
     };
     document.addEventListener("visibilitychange", handleVisibility);
@@ -139,6 +137,17 @@ export default function TerminalPage() {
       if (simTimerRef.current) clearTimeout(simTimerRef.current);
     }
   }, [isSimActive]);
+
+  useEffect(() => {
+    if (isHftActive) {
+      if (hftTimerRef.current) clearTimeout(hftTimerRef.current);
+      hftTimerRef.current = setTimeout(() => {
+        setIsHftActive(false);
+      }, 10 * 60 * 1000); // 10 minutes auto-off
+    } else {
+      if (hftTimerRef.current) clearTimeout(hftTimerRef.current);
+    }
+  }, [isHftActive]);
 
   // Clock tick – initialised inside useEffect to avoid SSR/client hydration mismatch
   useEffect(() => {
@@ -288,6 +297,14 @@ export default function TerminalPage() {
               const next = [...prev, entry];
               return next.length > 100 ? next.slice(-100) : next;
             });
+          } else if (msg.type === "RESET") {
+            setCandleMap({});
+            setStocks(INITIAL_STOCKS);
+            setUserOrders([]);
+            setUserHoldings({});
+            setUserBalance(10_000_000);
+            setHft(null);
+            setHftHistory([]);
           }
         } catch {}
       };
@@ -774,17 +791,23 @@ export default function TerminalPage() {
             ))}
           </div>
 
-          {/* Tab Content */}
-          <div className="flex-1 overflow-y-auto">
             {rightTab === "ORDER" && (
-              <OrderTicket
-                symbol={activePanel?.symbol || "TCS"}
-                exchange={activePanel?.exchange || "AYUSHSE"}
-                currentLtp={currentPrice}
-                userBalance={userBalance}
-                userHoldingQty={userHoldings[activePanel?.symbol || "TCS"]?.qty || 0}
-                onOrderPlaced={handleOrderPlaced}
-              />
+              activePanel?.symbol === "AYUSH-5" ? (
+                <div className="p-4 text-center font-mono flex flex-col items-center justify-center h-full gap-2 text-[#4a5568]">
+                  <span className="text-xs font-bold text-[#f59e0b]">AYUSH-5 INDEX</span>
+                  <span className="text-[10px] text-[#8494a7]">Indices are benchmark baskets and cannot be traded directly.</span>
+                  <span className="text-[9px] text-[#4a5568]">Select a constituent stock (TCS, RELIANCE, etc.) to place orders.</span>
+                </div>
+              ) : (
+                <OrderTicket
+                  symbol={activePanel?.symbol || "TCS"}
+                  exchange={activePanel?.exchange || "AYUSHSE"}
+                  currentLtp={currentPrice}
+                  userBalance={userBalance}
+                  userHoldingQty={userHoldings[activePanel?.symbol || "TCS"]?.qty || 0}
+                  onOrderPlaced={handleOrderPlaced}
+                />
+              )
             )}
 
             {rightTab === "ACCOUNT" && (
@@ -931,26 +954,6 @@ export default function TerminalPage() {
                   </div>
                 </div>
 
-                {hftHistory.length > 1 && (
-                  <div className="border-t border-[#1e2740] pt-2">
-                    <div className="text-[9px] font-mono tracking-widest text-[#4a5568] uppercase mb-1">Capital Growth</div>
-                    <div className="flex items-end gap-[1px] h-8">
-                      {hftHistory.slice(-40).map((h, i) => {
-                        const min = Math.min(...hftHistory.slice(-40).map(x => x.capital));
-                        const max = Math.max(...hftHistory.slice(-40).map(x => x.capital));
-                        const range = max - min || 1;
-                        const pct = ((h.capital - min) / range) * 100;
-                        return (
-                          <div
-                            key={i}
-                            className="flex-1 bg-[#00c07660]"
-                            style={{ height: `${Math.max(pct, 5)}%` }}
-                          />
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
               </div>
             )}
           </div>

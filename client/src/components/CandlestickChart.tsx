@@ -249,11 +249,11 @@ export function CandlestickChart({
     setDrawnLines([]);
   }, [drawnLines]);
 
-  // ─── Full reset: flush DB + Redis ────────────────────────────────
   const handleReset = useCallback(async () => {
     setIsResetting(true);
     try {
-      await fetch("/api/reset", { method: "POST" });
+      const backendHost = process.env.NEXT_PUBLIC_API_URL || "";
+      await fetch(`${backendHost}/api/reset`, { method: "POST" });
       clearLines();
       onReset?.();
     } finally {

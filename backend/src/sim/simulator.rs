@@ -30,12 +30,20 @@ impl SharedSentiment {
         }))
     }
 
-    /// Rotate to a purely random sentiment regime centered around 0.50.
+    /// Rotate to a wild sentiment regime (20% to 80%) with a slight upside bias (0.47 to 0.57 base).
     fn rotate(rng: &mut impl rand::Rng, _current_price_vs_ref: f64) -> Self {
+        let buy_prob = if rng.random_bool(0.70) {
+            // Slight upside bias: 47% - 57%
+            rng.random_range(0.47..=0.57_f64)
+        } else {
+            // Wild swing: 20% - 80%
+            rng.random_range(0.20..=0.80_f64)
+        };
+
         Self {
-            buy_prob: rng.random_range(0.45..=0.55_f64),
+            buy_prob,
             regime_started_at: Instant::now(),
-            regime_duration: Duration::from_secs_f64(rng.random_range(3.0..=8.0)),
+            regime_duration: Duration::from_secs_f64(rng.random_range(2.0..=6.0)),
         }
     }
 }
@@ -50,13 +58,10 @@ pub struct StepMetrics {
 pub struct Simulator {
     pub symbol: String,
     pub initial_reference_price: Price,
-    /// Market direction (buy_prob) shared with other simulators so sentiment is consistent.
     pub shared_sentiment: Arc<Mutex<SharedSentiment>>,
 }
 
 impl Simulator {
-    /// `initial_price_paisa` must be the stock's actual starting price so
-    /// mean-reversion is calculated against the right baseline.
     pub fn new(symbol: String, initial_price_paisa: u64, shared_sentiment: Arc<Mutex<SharedSentiment>>) -> Self {
         Self {
             symbol,
@@ -68,9 +73,6 @@ impl Simulator {
     pub fn step(&mut self, market: &mut Market) -> StepMetrics {
         let mut rng = rand::rng();
 
-        // --- SENTIMENT (shared) ---
-        // Check if the current regime has expired and rotate if so.
-        // Whoever locks first wins; the other reads the already-updated value.
         let current_ltp = market
             .get_orderbook(&self.symbol)
             .map(|b| b.ltp)
@@ -86,8 +88,8 @@ impl Simulator {
             s.buy_prob
         };
 
-        // --- VOLUME: 1–10 random orders per step per stock ---
-        let target_volume: usize = rng.random_range(1..=10);
+        // --- Low speed volume: 1–3 random orders per step tick ---
+        let target_volume: usize = rng.random_range(1..=3);
 
         let market_order_prob = 0.25_f64;
 
