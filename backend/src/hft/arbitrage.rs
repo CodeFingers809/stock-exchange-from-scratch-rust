@@ -85,7 +85,7 @@ impl CrossExchangeArbitrage {
         self.losing_trades = 0;
         self.total_executed_arbitrages = 0;
         let mut port = self.user.portfolio.lock().unwrap();
-        port.cash_balance = 100_000_000_000; // ₹100 Cr (10^11 paisa)
+        port.balance_paisa = 100_000_000_000; // ₹100 Cr
         port.holdings.clear();
     }
 

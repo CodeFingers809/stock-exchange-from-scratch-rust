@@ -327,8 +327,6 @@ async fn toggle_sim_handler(
     }))
 }
 
-pub static HFT_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
 async fn toggle_hft_handler(
     axum::extract::State(state): axum::extract::State<ApiState>,
 ) -> Json<serde_json::Value> {
